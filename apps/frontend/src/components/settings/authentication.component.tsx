@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 
@@ -42,6 +43,11 @@ const AuthenticationComponent = () => {
           <div className="text-[14px] text-textItemBlur">{user.email}</div>
         )}
       </div>
+      {user.providerName === 'LOCAL' && (
+        <Link href="/auth/forgot" prefetch={false} className="underline w-fit">
+          {t('reset_password', 'Reset password')}
+        </Link>
+      )}
     </div>
   );
 };

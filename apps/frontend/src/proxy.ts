@@ -27,7 +27,11 @@ export async function proxy(request: NextRequest) {
       const payload = verify(rawAuth, process.env.JWT_SECRET, {
         algorithms: ['HS256'],
       });
-      if (typeof payload === 'object' && typeof payload.id === 'string' && payload.id) {
+      if (
+        typeof payload === 'object' &&
+        typeof payload.id === 'string' &&
+        payload.id
+      ) {
         authCookie = rawAuth;
       }
     } catch {
@@ -35,7 +39,11 @@ export async function proxy(request: NextRequest) {
     }
   }
   const clearSession = (response: NextResponse) => {
-    for (const name of [sessionCookieNames.auth, sessionCookieNames.showorg, sessionCookieNames.impersonate]) {
+    for (const name of [
+      sessionCookieNames.auth,
+      sessionCookieNames.showorg,
+      sessionCookieNames.impersonate,
+    ]) {
       response.cookies.set(name, '', {
         path: '/',
         ...(!process.env.NOT_SECURED
@@ -110,12 +118,24 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/auth/login', nextUrl.href));
   }
 
-  if (!authCookie && (rawAuth || request.cookies.has(sessionCookieNames.auth))) {
+  if (
+    !authCookie &&
+    (rawAuth || request.cookies.has(sessionCookieNames.auth))
+  ) {
     return clearSession(
       nextUrl.pathname.startsWith('/auth')
         ? topResponse
         : NextResponse.redirect(new URL('/auth/login', nextUrl.href))
     );
+  }
+
+  // Recovery must also work for people who are already signed in. Do not send
+  // either the request form or an emailed reset link back to the dashboard.
+  if (
+    nextUrl.pathname === '/auth/forgot' ||
+    nextUrl.pathname.startsWith('/auth/forgot/')
+  ) {
+    return topResponse;
   }
 
   const org = nextUrl.searchParams.get('org');

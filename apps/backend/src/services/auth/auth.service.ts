@@ -235,16 +235,26 @@ export class AuthService {
     );
   }
 
-  forgotReturn(body: ForgotReturnPasswordDto) {
-    const user = AuthChecker.verifyJWT(body.token) as {
-      id: string;
-      expires: string;
-    };
-    if (typeof user.id !== 'string' || dayjs(user.expires).isBefore(dayjs())) {
+  async forgotReturn(body: ForgotReturnPasswordDto) {
+    try {
+      const user = AuthChecker.verifyJWT(body.token);
+      if (
+        !user ||
+        typeof user !== 'object' ||
+        typeof user.id !== 'string' ||
+        !user.id ||
+        typeof user.expires !== 'string' ||
+        !dayjs(user.expires).isValid() ||
+        !dayjs(user.expires).isAfter(dayjs())
+      ) {
+        return false;
+      }
+      return !!(await this._userService.updatePassword(user.id, body.password));
+    } catch {
+      // Invalid signatures, expired links and removed accounts are expected
+      // recovery failures, not unhandled errors or successful password resets.
       return false;
     }
-
-    return this._userService.updatePassword(user.id, body.password);
   }
 
   async activate(code: string, tracking: string) {
