@@ -1,0 +1,191 @@
+name: socialz
+
+x-limits: &limits
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: '10m'
+      max-file: '3'
+
+services:
+  postiz:
+    <<: *limits
+    image: ${SOCIALZ_IMAGE:?Set a tested, versioned Socialz image}
+    cpus: 3
+    mem_limit: 6g
+    env_file: ${SOCIALZ_ENV_FILE:?Set the private runtime env file}
+    environment:
+      MAIN_URL: https://socialz.mpsolara.com
+      FRONTEND_URL: https://socialz.mpsolara.com
+      NEXT_PUBLIC_BACKEND_URL: https://socialz.mpsolara.com/api
+      BACKEND_INTERNAL_URL: http://localhost:3000
+      REDIS_URL: redis://redis:6379
+      TEMPORAL_ADDRESS: temporal:7233
+      COOKIE_HOST_ONLY: 'true'
+      IS_GENERAL: 'true'
+      DISABLE_REGISTRATION: 'true'
+      STORAGE_PROVIDER: local
+      UPLOAD_DIRECTORY: /uploads
+      NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY: /uploads
+      EMAIL_FROM_NAME: Socialz
+      NODE_OPTIONS: --max-old-space-size=3072
+    volumes:
+      - config:/config
+      - type: bind
+        source: ${SOCIALZ_MEDIA_ROOT:?Set a dedicated directory on the verified RAID}
+        target: /uploads
+        bind:
+          create_host_path: false
+    ports:
+      - 127.0.0.1:18470:5000
+    networks: [app, ingress]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      temporal: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "Promise.all(['/auth/login','/api/auth/can-register'].map(p=>fetch('http://127.0.0.1:5000'+p))).then(rs=>process.exit(rs.every(r=>r.ok)?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+
+  postgres:
+    <<: *limits
+    image: postgres:17-alpine
+    cpus: 1
+    mem_limit: 1g
+    environment:
+      POSTGRES_USER: socialz
+      POSTGRES_DB: socialz
+      POSTGRES_PASSWORD: ${SOCIALZ_DB_PASSWORD:?Set a generated database password}
+    volumes: [postgres:/var/lib/postgresql/data]
+    networks: [app]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U socialz -d socialz]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    <<: *limits
+    image: redis:7.2
+    cpus: 0.5
+    mem_limit: 256m
+    command:
+      [
+        redis-server,
+        --appendonly,
+        'yes',
+        --maxmemory,
+        192mb,
+        --maxmemory-policy,
+        noeviction,
+      ]
+    volumes: [redis:/data]
+    networks: [app]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  temporal-postgres:
+    <<: *limits
+    image: postgres:16
+    cpus: 1
+    mem_limit: 768m
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${SOCIALZ_TEMPORAL_PASSWORD:?Set a separate generated password}
+    volumes: [temporal-postgres:/var/lib/postgresql/data]
+    networks: [app]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U temporal]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch:
+    <<: *limits
+    image: elasticsearch:7.17.27
+    cpus: 1
+    mem_limit: 768m
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: -Xms256m -Xmx256m
+    volumes: [elasticsearch:/usr/share/elasticsearch/data]
+    networks: [app]
+
+  temporal:
+    <<: *limits
+    image: temporalio/auto-setup:1.28.1
+    cpus: 1
+    mem_limit: 1g
+    depends_on:
+      temporal-postgres: { condition: service_healthy }
+      elasticsearch: { condition: service_started }
+    environment:
+      DB: postgres12
+      DB_PORT: '5432'
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${SOCIALZ_TEMPORAL_PASSWORD}
+      POSTGRES_SEEDS: temporal-postgres
+      ENABLE_ES: 'true'
+      ES_SEEDS: elasticsearch
+      ES_VERSION: v7
+      TEMPORAL_NAMESPACE: default
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    volumes:
+      - ../../dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    networks: [app]
+    healthcheck:
+      test:
+        [
+          CMD,
+          temporal,
+          --address,
+          'temporal:7233',
+          operator,
+          namespace,
+          describe,
+          --namespace,
+          default,
+        ]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 18
+
+  tunnel:
+    <<: *limits
+    image: cloudflare/cloudflared:2026.9.0
+    profiles: [public]
+    cpus: 0.5
+    mem_limit: 192m
+    command:
+      [tunnel, --no-autoupdate, run, --token-file, /run/secrets/tunnel-token]
+    volumes:
+      - ${SOCIALZ_TUNNEL_TOKEN_FILE:?Set private token-file path}:/run/secrets/tunnel-token:ro
+    networks: [ingress]
+    depends_on:
+      postiz: { condition: service_healthy }
+
+volumes:
+  config:
+  postgres:
+  redis:
+  temporal-postgres:
+  elasticsearch:
+
+networks:
+  app:
+  ingress:

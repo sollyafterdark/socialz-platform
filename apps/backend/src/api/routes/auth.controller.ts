@@ -1,3 +1,4 @@
+import { sessionCookieNames } from '@gitroom/helpers/auth/session.cookies';
 import {
   Body,
   Controller,
@@ -54,7 +55,7 @@ export class AuthController {
   ) {
     try {
       const getOrgFromCookie = this._authService.getOrgFromCookie(
-        req?.cookies?.org
+        req?.cookies?.[sessionCookieNames.org]
       );
 
       const { jwt, addedOrg } = await this._authService.routeAuth(
@@ -74,7 +75,7 @@ export class AuthController {
         return;
       }
 
-      response.cookie('auth', jwt, {
+      response.cookie(sessionCookieNames.auth, jwt, {
         domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
         ...(!process.env.NOT_SECURED
           ? {
@@ -91,7 +92,7 @@ export class AuthController {
       }
 
       if (typeof addedOrg !== 'boolean' && addedOrg?.organizationId) {
-        response.cookie('showorg', addedOrg.organizationId, {
+        response.cookie(sessionCookieNames.showorg, addedOrg.organizationId, {
           domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
           ...(!process.env.NOT_SECURED
             ? {
@@ -128,7 +129,7 @@ export class AuthController {
   ) {
     try {
       const getOrgFromCookie = this._authService.getOrgFromCookie(
-        req?.cookies?.org
+        req?.cookies?.[sessionCookieNames.org]
       );
 
       const { jwt, addedOrg } = await this._authService.routeAuth(
@@ -139,7 +140,7 @@ export class AuthController {
         getOrgFromCookie
       );
 
-      response.cookie('auth', jwt, {
+      response.cookie(sessionCookieNames.auth, jwt, {
         domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
         ...(!process.env.NOT_SECURED
           ? {
@@ -156,7 +157,7 @@ export class AuthController {
       }
 
       if (typeof addedOrg !== 'boolean' && addedOrg?.organizationId) {
-        response.cookie('showorg', addedOrg.organizationId, {
+        response.cookie(sessionCookieNames.showorg, addedOrg.organizationId, {
           domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
           ...(!process.env.NOT_SECURED
             ? {
@@ -224,7 +225,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response
   ) {
     const state = `login-${makeSecureId(16)}`;
-    response.cookie('oauth_state', state, {
+    response.cookie(sessionCookieNames.oauth_state, state, {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED
         ? {
@@ -253,7 +254,7 @@ export class AuthController {
       return response.status(200).json({ can: false });
     }
 
-    response.cookie('auth', activate, {
+    response.cookie(sessionCookieNames.auth, activate, {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED
         ? {
@@ -353,14 +354,14 @@ export class AuthController {
       code,
       redirect_uri,
       state,
-      req?.cookies?.oauth_state
+      req?.cookies?.[sessionCookieNames.oauth_state]
     );
 
     if (token) {
       return response.json({ token });
     }
 
-    response.cookie('auth', jwt, {
+    response.cookie(sessionCookieNames.auth, jwt, {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED
         ? {

@@ -1,3 +1,4 @@
+import { sessionCookieNames } from '@gitroom/helpers/auth/session.cookies';
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
@@ -10,7 +11,7 @@ import { MastraService } from '@gitroom/nestjs-libraries/chat/mastra.service';
 import { setSentryUserContext } from '@gitroom/nestjs-libraries/sentry/initialize.sentry';
 
 export const removeAuth = (res: Response) => {
-  res.cookie('auth', '', {
+  res.cookie(sessionCookieNames.auth, '', {
     domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
     ...(!process.env.NOT_SECURED
       ? {
@@ -32,7 +33,7 @@ export class AuthMiddleware implements NestMiddleware {
     private _userService: UsersService
   ) {}
   async use(req: Request, res: Response, next: NextFunction) {
-    const auth = req.headers.auth || req.cookies.auth;
+    const auth = req.headers.auth || req.cookies[sessionCookieNames.auth];
     if (!auth) {
       throw new HttpForbiddenException();
     }
@@ -41,7 +42,7 @@ export class AuthMiddleware implements NestMiddleware {
       // claims (id, isSuperAdmin, activated) from the token body — always
       // re-resolve the user from the database using the id.
       const payload = AuthService.verifyJWT(auth) as User | null;
-      const orgHeader = req.cookies.showorg || req.headers.showorg;
+      const orgHeader = req.cookies[sessionCookieNames.showorg] || req.headers.showorg;
 
       if (!payload?.id || typeof payload.id !== 'string') {
         throw new HttpForbiddenException();
@@ -57,7 +58,7 @@ export class AuthMiddleware implements NestMiddleware {
         throw new HttpForbiddenException();
       }
 
-      const impersonate = req.cookies.impersonate || req.headers.impersonate;
+      const impersonate = req.cookies[sessionCookieNames.impersonate] || req.headers.impersonate;
       if (user?.isSuperAdmin && impersonate) {
         const loadImpersonate = await this._organizationService.getUserOrg(
           impersonate

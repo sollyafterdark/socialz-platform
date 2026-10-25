@@ -1,3 +1,4 @@
+import { sessionCookieNames } from '@gitroom/helpers/auth/session.cookies';
 import { Input } from '@gitroom/react/form/input';
 import { ChangeEventHandler, FC, useCallback, useMemo, useState } from 'react';
 import useSWR, { useSWRConfig } from 'swr';
@@ -1024,7 +1025,7 @@ export const Impersonate = () => {
   }, [name]);
   const stopImpersonating = useCallback(async () => {
     if (!isSecured) {
-      setCookie('impersonate', '', -10);
+      setCookie(sessionCookieNames.impersonate, '', -10);
     } else {
       await fetch(`/user/impersonate`, {
         method: 'POST',

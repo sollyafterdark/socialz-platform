@@ -21,3 +21,12 @@ dist
 .git
 .github
 reports
+
+# Keep runtime credentials out of build contexts.
+**/.env
+**/*.env
+/infra/socialz/tunnel-token
+**/*.pem
+**/*.key
+!**/*.env.example
+!LICENSE

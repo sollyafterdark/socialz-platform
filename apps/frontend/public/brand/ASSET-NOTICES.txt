@@ -1,0 +1,9 @@
+Socialz Blue Hour brand assets, version 1.0, 25 October 2026.
+
+The logo SVGs are vector reconstructions prepared for this project. The wordmark is outlined from Sora 700. No font installation is required to display outlined logo SVGs.
+
+Sora and Inter font software is distributed under the respective SIL Open Font License 1.1 notices in fonts/. Preserve those notices when redistributing the font software. Outlined brand artwork does not replace those font-software notices.
+
+Postiz application source is not included in this asset kit. When this branding is integrated into Postiz, comply with the application's AGPL-3.0 terms, preserve required notices and provide Corresponding Source for the deployed modifications.
+
+Socialz is a proposed product identity. This package does not represent a trademark search, registration or clearance.

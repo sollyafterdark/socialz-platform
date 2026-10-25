@@ -1,5 +1,7 @@
 'use client';
 
+import { sessionCookieNames } from '@gitroom/helpers/auth/session.cookies';
+
 import React, { FC, useCallback } from 'react';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
@@ -22,7 +24,7 @@ export const LogoutComponent: FC<{ isIcon?: boolean }> = ({ isIcon }) => {
       )
     ) {
       if (!isSecured) {
-        setCookie('auth', '', -10);
+        setCookie(sessionCookieNames.auth, '', -10);
       } else {
         await fetch('/user/logout', {
           method: 'POST',

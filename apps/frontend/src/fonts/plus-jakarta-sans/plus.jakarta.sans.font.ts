@@ -1,12 +1,2 @@
-import localFont from 'next/font/local';
-
-export const jakartaSans = localFont({
-  src: [
-    { path: './PlusJakartaSans.woff2', weight: '500 700', style: 'normal' },
-    {
-      path: './PlusJakartaSans-Italic.woff2',
-      weight: '500 700',
-      style: 'italic',
-    },
-  ],
-});
+// Preserve upstream imports while using Socialz's self-hosted UI font.
+export { inter as jakartaSans } from '../socialz/socialz.font';
