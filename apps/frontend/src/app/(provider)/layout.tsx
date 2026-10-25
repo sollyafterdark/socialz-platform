@@ -1,4 +1,6 @@
 import { MantineWrapper } from '@gitroom/react/helpers/mantine.wrapper';
+import type { Metadata } from 'next';
+import { socialzIcons } from '@gitroom/frontend/components/layout/socialz.icons';
 
 export const dynamic = 'force-dynamic';
 import '../global.scss';
@@ -11,12 +13,11 @@ import clsx from 'clsx';
 import { VariableContextComponent } from '@gitroom/react/helpers/variable.context';
 import UtmSaver from '@gitroom/helpers/utils/utm.saver';
 
+export const metadata: Metadata = { icons: socialzIcons };
+
 export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <html>
-      <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
-      </head>
       <body
         className={clsx(jakartaSans.className, 'dark text-primary !bg-primary')}
       >

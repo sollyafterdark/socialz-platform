@@ -5,6 +5,7 @@ import '../global.scss';
 import '../socialz.scss';
 import { sora } from '@gitroom/frontend/fonts/socialz/socialz.font';
 import type { Metadata } from 'next';
+import { socialzIcons } from '@gitroom/frontend/components/layout/socialz.icons';
 import 'react-tooltip/dist/react-tooltip.css';
 import '@copilotkit/react-ui/styles.css';
 import LayoutContext from '@gitroom/frontend/components/layout/layout.context';
@@ -34,7 +35,7 @@ export const metadata: Metadata = {
     'Your content, in rhythm. Plan, collaborate and publish with Socialz.',
   applicationName: 'Socialz',
   manifest: '/site.webmanifest',
-  icons: { icon: '/favicon.ico', apple: '/brand/icons/apple-touch-icon.png' },
+  icons: socialzIcons,
   openGraph: {
     title: 'Socialz',
     description: 'Your content, in rhythm.',
@@ -52,7 +53,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <html lang={language}>
       <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
         {!!process.env.DATAFAST_WEBSITE_ID && (
           <Script
             data-website-id={process.env.DATAFAST_WEBSITE_ID}
