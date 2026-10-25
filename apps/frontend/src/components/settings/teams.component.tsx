@@ -17,6 +17,7 @@ import { useToaster } from '@gitroom/react/toaster/toaster';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import copy from 'copy-to-clipboard';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { WorkspaceSettings } from './workspace-settings.component';
 
 const roles = [
   {
@@ -173,6 +174,7 @@ export const TeamsComponent = () => {
 
   return (
     <div className="flex flex-col">
+      <WorkspaceSettings />
       <h3 className="text-[20px]">{t('team_members', 'Team Members')}</h3>
       <div className="text-customColor18 mt-[4px]">
         {t(

@@ -5,6 +5,7 @@ import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { MenuItem } from '@gitroom/frontend/components/new-layout/menu-item';
+import { LogoutComponent } from '@gitroom/frontend/components/layout/logout.component';
 
 interface MenuItemInterface {
   name: string;
@@ -281,13 +282,15 @@ export const TopMenu: FC = () => {
             return true;
           })
           .map((item, index) => (
-            <MenuItem
-              path={item.path}
-              label={item.name}
-              icon={item.icon}
-              key={item.name}
-              onClick={item.onClick}
-            />
+            <div key={item.path} className="flex flex-col gap-[8px]">
+              {item.path === '/settings' && <LogoutComponent isIcon />}
+              <MenuItem
+                path={item.path}
+                label={item.name}
+                icon={item.icon}
+                onClick={item.onClick}
+              />
+            </div>
           ))}
       </div>
     </>

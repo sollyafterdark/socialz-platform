@@ -88,6 +88,14 @@ export class OrganizationService {
     return this._organizationRepository.getTeam(orgId);
   }
 
+  getWorkspaceSettings(orgId: string) {
+    return this._organizationRepository.getWorkspaceSettings(orgId);
+  }
+
+  updateWorkspaceName(orgId: string, name: string) {
+    return this._organizationRepository.updateWorkspaceName(orgId, name);
+  }
+
   async setStreak(organizationId: string, type: 'start' | 'end') {
     return this._organizationRepository.setStreak(organizationId, type);
   }

@@ -19,7 +19,6 @@ import { useSWRConfig } from 'swr';
 import clsx from 'clsx';
 import { TeamsComponent } from '@gitroom/frontend/components/settings/teams.component';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
-import { LogoutComponent } from '@gitroom/frontend/components/layout/logout.component';
 import { useSearchParams } from 'next/navigation';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { PublicComponent } from '@gitroom/frontend/components/public-api/public.component';
@@ -91,7 +90,7 @@ export const SettingsPopup: FC<{
     if (user?.tier?.public_api && isGeneral && showLogout) {
       arr.push({ tab: 'agents', label: t('agents_dev', 'Agents / Dev') });
     }
-    if (user?.tier?.team_members && isGeneral && user?.role !== 'USER') {
+    if (user?.tier?.team_members && isGeneral && (user?.role !== 'USER' || user?.isSuperAdmin)) {
       arr.push({ tab: 'teams', label: t('teams', 'Teams') });
     }
     if (user?.tier?.webhooks) {
@@ -148,13 +147,6 @@ export const SettingsPopup: FC<{
               {label}
             </div>
           ))}
-        </div>
-        <div>
-          {showLogout && (
-            <div className="mt-4 mobile:mt-[8px]">
-              <LogoutComponent />
-            </div>
-          )}
         </div>
       </div>
       <div className="bg-newBgColorInner flex-1 min-w-0 flex-col flex p-[20px] mobile:p-[12px] gap-[12px]">

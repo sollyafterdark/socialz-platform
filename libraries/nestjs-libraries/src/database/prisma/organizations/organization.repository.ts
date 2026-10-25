@@ -75,6 +75,21 @@ export class OrganizationRepository {
     return this._organization.model.organization.count();
   }
 
+  getWorkspaceSettings(orgId: string) {
+    return this._organization.model.organization.findUniqueOrThrow({
+      where: { id: orgId },
+      select: { id: true, name: true },
+    });
+  }
+
+  updateWorkspaceName(orgId: string, name: string) {
+    return this._organization.model.organization.update({
+      where: { id: orgId },
+      data: { name },
+      select: { id: true, name: true },
+    });
+  }
+
   getSuperAdminUser(orgId: string) {
     return this._userOrg.model.userOrganization.findFirst({
       where: {
