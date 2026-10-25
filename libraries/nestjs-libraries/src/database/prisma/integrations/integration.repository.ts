@@ -182,12 +182,14 @@ export class IntegrationRepository {
     });
 
     // The page was picked through a fresh login: the row that keeps living
-    // must also take that login's identity and refresh token, otherwise the
-    // next refresh runs as the old identity and cannot find the page.
+    // must also take that login's provider, identity and refresh token. The
+    // credentials must be handled by the provider that issued them, including
+    // when switching an Instagram channel from standalone to Facebook login.
     const fresh = existing
       ? await this._integration.model.integration.findUnique({
           where: { id },
           select: {
+            providerIdentifier: true,
             rootInternalId: true,
             refreshToken: true,
             tokenExpiration: true,
@@ -222,6 +224,9 @@ export class IntegrationRepository {
       },
       data: {
         ...params,
+        ...(fresh?.providerIdentifier
+          ? { providerIdentifier: fresh.providerIdentifier }
+          : {}),
         ...(fresh?.rootInternalId
           ? { rootInternalId: fresh.rootInternalId }
           : {}),
