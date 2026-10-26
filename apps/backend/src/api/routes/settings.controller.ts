@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ConflictException,
   Delete,
   ForbiddenException,
   Get,
@@ -33,6 +34,17 @@ import {
 @Controller('/settings')
 export class SettingsController {
   constructor(private _organizationService: OrganizationService) {}
+
+  private assertExpectedWorkspace(
+    org: Organization,
+    expectedWorkspaceId?: string
+  ) {
+    if (expectedWorkspaceId !== undefined && expectedWorkspaceId !== org.id) {
+      throw new ConflictException(
+        'The active workspace changed. Refresh this page before adding a member.'
+      );
+    }
+  }
 
   @Get('/workspace')
   getWorkspace(@GetOrgFromRequest() org: Organization) {
@@ -79,6 +91,7 @@ export class SettingsController {
     @GetUserFromRequest() user: User,
     @Body() body: AddTeamMemberDto
   ) {
+    this.assertExpectedWorkspace(org, body.expectedWorkspaceId);
     return this._organizationService.inviteTeamMember(org, user, body);
   }
 
@@ -92,6 +105,7 @@ export class SettingsController {
       throw new HttpException('Unauthorized', 400);
     }
 
+    this.assertExpectedWorkspace(org, body.expectedWorkspaceId);
     return this._organizationService.addTeamMemberByEmail(org, body);
   }
 

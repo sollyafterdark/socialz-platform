@@ -10,6 +10,7 @@ import {
 import { TeamsComponent, AddMember } from './teams.component';
 
 let mockUser: any;
+let mockWorkspaces: { id: string; name: string }[] | undefined;
 const mockFetch = jest.fn();
 const mockMutate = jest.fn(async () => {});
 const mockClose = jest.fn();
@@ -39,7 +40,12 @@ jest.mock('@gitroom/react/toaster/toaster', () => ({
 jest.mock('swr', () => ({
   __esModule: true,
   default: (key: string) => ({
-    data: key?.startsWith('/api/teams') ? mockData : [],
+    data:
+      key === 'organizations'
+        ? mockWorkspaces
+        : key?.startsWith('/api/teams')
+        ? mockData
+        : [],
     mutate: mockMutate,
   }),
   useSWRConfig: () => ({ mutate: mockMutate }),
@@ -96,6 +102,10 @@ beforeEach(() => {
     isSuperAdmin: true,
     role: 'SUPERADMIN',
   };
+  mockWorkspaces = [
+    { id: 'workspace-a', name: 'Socialz' },
+    { id: 'workspace-b', name: 'MPSolara' },
+  ];
   mockFetch.mockReset();
   mockClose.mockClear();
   mockMutate.mockClear();
@@ -169,4 +179,52 @@ it('uses the existing owner-only add endpoint for an existing account', async ()
     '/settings/team/add',
     expect.objectContaining({ method: 'POST' })
   );
+});
+
+it('shows the selected destination and binds the invitation to that workspace', async () => {
+  mockUser.orgId = 'workspace-b';
+  mockFetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ url: 'https://example.test/invitation' }),
+  });
+  render(React.createElement(AddMember));
+  const region = screen.getByRole('region', { name: 'Destination workspace' });
+  expect(region.textContent).toContain('MPSolara');
+  expect(region.textContent).not.toContain('Socialz');
+  fireEvent.change(screen.getByLabelText('Email'), {
+    target: { value: 'member@example.test' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+  await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+  expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual(
+    expect.objectContaining({ expectedWorkspaceId: 'workspace-b' })
+  );
+});
+it('disables invitations while the destination workspace is unavailable', () => {
+  mockWorkspaces = undefined;
+  render(React.createElement(AddMember));
+  expect(
+    (
+      screen.getByRole('button', {
+        name: 'Send invitation',
+      }) as HTMLButtonElement
+    ).disabled
+  ).toBe(true);
+  expect(
+    screen.getByRole('region', { name: 'Destination workspace' }).textContent
+  ).toContain('Loading workspace');
+});
+it('does not substitute another workspace when the active membership is missing', () => {
+  mockUser.orgId = 'unavailable-workspace';
+  render(React.createElement(AddMember));
+  expect(
+    (
+      screen.getByRole('button', {
+        name: 'Send invitation',
+      }) as HTMLButtonElement
+    ).disabled
+  ).toBe(true);
+  const region = screen.getByRole('region', { name: 'Destination workspace' });
+  expect(region.textContent).not.toContain('MPSolara');
+  expect(region.textContent).not.toContain('Socialz');
 });

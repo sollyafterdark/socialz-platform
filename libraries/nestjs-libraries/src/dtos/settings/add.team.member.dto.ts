@@ -1,4 +1,11 @@
-import { IsBoolean, IsDefined, IsEmail, IsIn, IsString } from 'class-validator';
+import {
+  IsBoolean,
+  IsDefined,
+  IsEmail,
+  IsIn,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export class AddTeamMemberDto {
   @IsDefined()
@@ -12,4 +19,8 @@ export class AddTeamMemberDto {
   @IsDefined()
   @IsBoolean()
   sendEmail: boolean;
+  // Confirm the workspace shown in the dialog; never use this to select one.
+  @IsOptional()
+  @IsString()
+  expectedWorkspaceId?: string;
 }

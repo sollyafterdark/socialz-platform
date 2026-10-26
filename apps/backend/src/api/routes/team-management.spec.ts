@@ -211,4 +211,49 @@ describe('self-hosted team HTTP boundaries', () => {
       ).status
     ).toBe(400);
   });
+  it('rejects an invite if another tab changed the active workspace', async () => {
+    const response = await request('/settings/team', 'POST', {
+      email: 'person@example.test',
+      role: 'USER',
+      sendEmail: false,
+      expectedWorkspaceId: 'workspace-b',
+    });
+    expect(response.status).toBe(409);
+    expect(repo.createInvitation).not.toHaveBeenCalled();
+  });
+  it('accepts a matching workspace confirmation without selecting a caller-supplied workspace', async () => {
+    const response = await request('/settings/team', 'POST', {
+      email: 'person@example.test',
+      role: 'USER',
+      sendEmail: false,
+      expectedWorkspaceId: 'workspace-a',
+      organizationId: 'workspace-b',
+    });
+    expect(response.status).toBe(201);
+    expect(repo.createInvitation.mock.calls[0][0].organizationId).toBe(
+      'workspace-a'
+    );
+  });
+  it('also protects direct existing-account addition after a workspace switch', async () => {
+    owner = true;
+    const response = await request('/settings/team/add', 'POST', {
+      email: 'person@example.test',
+      role: 'USER',
+      expectedWorkspaceId: 'workspace-b',
+    });
+    expect(response.status).toBe(409);
+  });
+  it('validates the workspace confirmation field', async () => {
+    expect(
+      (
+        await request('/settings/team', 'POST', {
+          email: 'person@example.test',
+          role: 'USER',
+          sendEmail: false,
+          expectedWorkspaceId: { id: 'workspace-a' },
+        })
+      ).status
+    ).toBe(400);
+    expect(repo.createInvitation).not.toHaveBeenCalled();
+  });
 });

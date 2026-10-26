@@ -39,6 +39,26 @@ export const AddMember = () => {
   const fetch = useFetch();
   const toast = useToaster();
   const { mutate } = useSWRConfig();
+  const { data: workspaces, error: workspaceError } = useSWR<
+    { id: string; name: string }[]
+  >(
+    'organizations',
+    async () => {
+      const response = await fetch('/user/organizations');
+      if (!response.ok) throw new Error('Could not load workspaces');
+      return response.json();
+    },
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
+    }
+  );
+  const workspace = Array.isArray(workspaces)
+    ? workspaces.find((current) => current.id === user?.orgId)
+    : undefined;
+  const workspaceUnavailable =
+    !!workspaceError || (Array.isArray(workspaces) && !workspace);
   const [existing, setExisting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -54,12 +74,24 @@ export const AddMember = () => {
     role: string;
     sendEmail: boolean;
   }) => {
+    if (!workspace || workspaceError) {
+      setError(
+        'Could not confirm the workspace. Refresh this page before adding a member.'
+      );
+      return;
+    }
     setBusy(true);
     setError('');
     try {
       const response = await fetch(
         existing ? '/settings/team/add' : '/settings/team',
-        { method: 'POST', body: JSON.stringify(values) }
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            ...values,
+            expectedWorkspaceId: workspace.id,
+          }),
+        }
       );
       const result = await response.json().catch(() => ({}));
       if (!response.ok)
@@ -92,6 +124,29 @@ export const AddMember = () => {
     <FormProvider {...form}>
       <form onSubmit={form.handleSubmit(submit)}>
         <div className="relative flex gap-[12px] flex-col p-[16px] pt-0">
+          <section
+            aria-label="Destination workspace"
+            className="bg-sixth border border-fifth rounded-[8px] p-[12px] flex flex-col gap-[6px]"
+          >
+            <span className="text-[13px] text-customColor18">Workspace</span>
+            <strong>
+              {workspace?.name ||
+                (workspaceUnavailable
+                  ? 'Workspace unavailable'
+                  : 'Loading workspace…')}
+            </strong>
+            <p className="text-[12px] text-customColor18">
+              This person will join this workspace only. To invite them to
+              another workspace, close this dialog and switch teams in the top
+              bar.
+            </p>
+            {workspaceUnavailable && (
+              <p role="alert">
+                Could not load the workspace. Refresh this page before adding a
+                member.
+              </p>
+            )}
+          </section>
           {user?.isSuperAdmin && (
             <label className="flex flex-col gap-[8px]">
               Add method
@@ -134,7 +189,11 @@ export const AddMember = () => {
               {error}
             </p>
           )}
-          <Button type="submit" disabled={busy} loading={busy}>
+          <Button
+            type="submit"
+            disabled={busy || !workspace || !!workspaceError}
+            loading={busy}
+          >
             {existing
               ? 'Add member'
               : sendEmail
