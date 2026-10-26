@@ -91,7 +91,8 @@ export class UsersController {
       throw new HttpForbiddenException();
     }
 
-    const impersonate = req.cookies[sessionCookieNames.impersonate] || req.headers.impersonate;
+    const impersonate =
+      req.cookies[sessionCookieNames.impersonate] || req.headers.impersonate;
     // @ts-ignore
     return {
       ...user,
@@ -206,7 +207,8 @@ export class UsersController {
 
   private getRequestUserId(req: Request): string | null {
     try {
-      const auth = (req.headers.auth as string) || req.cookies?.[sessionCookieNames.auth];
+      const auth =
+        (req.headers.auth as string) || req.cookies?.[sessionCookieNames.auth];
       const payload = AuthChecker.verifyJWT(auth) as { id?: string } | null;
       return payload?.id || null;
     } catch {
@@ -277,11 +279,9 @@ export class UsersController {
       return response.status(200).json({ id: null });
     }
 
-    const addedOrg = await this._orgService.addUserToOrg(
+    const addedOrg = await this._orgService.acceptInvitation(
       user.id,
-      getOrgFromCookie.id,
-      getOrgFromCookie.orgId,
-      getOrgFromCookie.role
+      getOrgFromCookie
     );
 
     response.status(200).json({
@@ -302,10 +302,15 @@ export class UsersController {
   }
 
   @Post('/change-org')
-  changeOrg(
+  async changeOrg(
+    @GetUserFromRequest() user: User,
     @Body('id') id: string,
     @Res({ passthrough: true }) response: Response
   ) {
+    const memberships = await this._orgService.getOrgsByUserId(user.id);
+    if (!memberships.some((org) => org.id === id && !org.users[0]?.disabled)) {
+      throw new HttpException('You are not a member of this workspace', 403);
+    }
     response.cookie(sessionCookieNames.showorg, id, {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED
@@ -336,7 +341,13 @@ export class UsersController {
     @Req() req: Request,
     @Res({ passthrough: true }) response: Response
   ) {
-    const impersonate = req.cookies[sessionCookieNames.impersonate] || req.headers.impersonate;
+    if (user.isSuperAdmin)
+      throw new HttpException(
+        'The Socialz owner account is protected from deletion',
+        403
+      );
+    const impersonate =
+      req.cookies[sessionCookieNames.impersonate] || req.headers.impersonate;
     if (impersonate) {
       throw new HttpException(
         'Account cannot be deleted while impersonating',
@@ -424,16 +435,7 @@ export class UsersController {
   ) {
     const { uniqueId, fbc, fbp } = applyTrackCookies(req, res, body.fbclid);
     this._trackService
-      .track(
-        uniqueId,
-        ip,
-        userAgent,
-        body.tt,
-        body.additional,
-        fbc,
-        user,
-        fbp
-      )
+      .track(uniqueId, ip, userAgent, body.tt, body.additional, fbc, user, fbp)
       .catch((err) => {});
 
     res.status(200).json({

@@ -113,7 +113,8 @@ export async function proxy(request: NextRequest) {
 
   if (
     nextUrl.pathname.startsWith('/auth/register') &&
-    process.env.DISABLE_REGISTRATION === 'true'
+    process.env.DISABLE_REGISTRATION === 'true' &&
+    !request.cookies.has(sessionCookieNames.org)
   ) {
     return NextResponse.redirect(new URL('/auth/login', nextUrl.href));
   }
@@ -182,16 +183,18 @@ export async function proxy(request: NextRequest) {
   }
   try {
     if (org) {
-      const { id } = await (
-        await internalFetch('/user/join-org', {
-          body: JSON.stringify({
-            org,
-          }),
-          method: 'POST',
-        })
-      ).json();
+      const joinResponse = await internalFetch('/user/join-org', {
+        body: JSON.stringify({
+          org,
+        }),
+        method: 'POST',
+      });
+      const { id } = joinResponse.ok ? await joinResponse.json() : { id: null };
       const redirect = NextResponse.redirect(
-        new URL(`/?added=true`, nextUrl.href)
+        new URL(
+          id ? '/?added=true' : '/settings?tab=teams&invitation=unavailable',
+          nextUrl.href
+        )
       );
       if (id) {
         redirect.cookies.set(sessionCookieNames.showorg, id, {

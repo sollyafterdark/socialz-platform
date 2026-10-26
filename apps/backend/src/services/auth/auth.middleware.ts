@@ -42,13 +42,16 @@ export class AuthMiddleware implements NestMiddleware {
       // claims (id, isSuperAdmin, activated) from the token body — always
       // re-resolve the user from the database using the id.
       const payload = AuthService.verifyJWT(auth) as User | null;
-      const orgHeader = req.cookies[sessionCookieNames.showorg] || req.headers.showorg;
+      const orgHeader =
+        req.cookies[sessionCookieNames.showorg] || req.headers.showorg;
 
       if (!payload?.id || typeof payload.id !== 'string') {
         throw new HttpForbiddenException();
       }
 
-      let user = (await this._userService.getUserById(payload.id)) as User | null;
+      let user = (await this._userService.getUserById(
+        payload.id
+      )) as User | null;
 
       if (!user) {
         throw new HttpForbiddenException();
@@ -58,13 +61,18 @@ export class AuthMiddleware implements NestMiddleware {
         throw new HttpForbiddenException();
       }
 
-      const impersonate = req.cookies[sessionCookieNames.impersonate] || req.headers.impersonate;
+      const impersonate =
+        req.cookies[sessionCookieNames.impersonate] || req.headers.impersonate;
       if (user?.isSuperAdmin && impersonate) {
         const loadImpersonate = await this._organizationService.getUserOrg(
           impersonate
         );
 
-        if (loadImpersonate) {
+        if (
+          loadImpersonate &&
+          !loadImpersonate.organization.deletedAt &&
+          !loadImpersonate.user.deletedAt
+        ) {
           user = loadImpersonate.user;
           user.isSuperAdmin = true;
           delete user.password;
@@ -102,7 +110,18 @@ export class AuthMiddleware implements NestMiddleware {
         organization.find((org) => org.subscription) ||
         organization[0];
 
-      if (!organization) {
+      if (!setOrg) {
+        // Removed members can still accept a new invitation or sign out.
+        // These endpoints need an authenticated account, not a current workspace.
+        if (
+          ['/user/join-org', '/user/organizations', '/user/logout'].some(
+            (path) => req.path.endsWith(path)
+          )
+        ) {
+          (req as any).user = user;
+          next();
+          return;
+        }
         throw new HttpForbiddenException();
       }
 

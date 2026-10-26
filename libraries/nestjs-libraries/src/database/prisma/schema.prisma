@@ -43,6 +43,8 @@ model Organization {
   usedCodes           UsedCodes[]
   users               UserOrganization[]
   webhooks            Webhooks[]
+  teamInvitations     TeamInvitation[]
+  teamAudit           TeamAudit[]
   oauthApp            OAuthApp[]
   oauthAuthorizations OAuthAuthorization[]
 
@@ -1838,4 +1840,34 @@ model Announcement {
   description String
   color       AnnouncementColor @default(INFO)
   createdAt   DateTime          @default(now())
+}
+
+
+// Invitation state supplements Postiz's signed links and native memberships.
+model TeamInvitation {
+  id             String @id
+  organizationId String
+  email          String
+  role           Role
+  invitedBy      String
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  acceptedBy     String?
+  revokedAt      DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, createdAt])
+}
+
+model TeamAudit {
+  id             String @id @default(uuid())
+  organizationId String
+  actorId        String
+  action         String
+  target         String?
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, createdAt])
 }

@@ -39,9 +39,17 @@ export class AuthController {
   ) {}
 
   @Get('/can-register')
-  async canRegister() {
+  async canRegister(@Req() req: Request) {
+    const invitation = this._authService.getOrgFromCookie(
+      req.cookies?.[sessionCookieNames.org]
+    );
+    const register = await this._authService.canRegister(
+      Provider.LOCAL as string,
+      invitation
+    );
     return {
-      register: await this._authService.canRegister(Provider.LOCAL as string),
+      register,
+      invitation: register && invitation ? { email: invitation.email } : null,
     };
   }
 

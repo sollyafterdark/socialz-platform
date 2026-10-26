@@ -18,15 +18,21 @@ import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.te
 import { AdminAddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/admin.add.team.member.dto';
 import { ShortlinkPreferenceDto } from '@gitroom/nestjs-libraries/dtos/settings/shortlink-preference.dto';
 import { WorkspaceSettingsDto } from '@gitroom/nestjs-libraries/dtos/settings/workspace-settings.dto';
+import {
+  TeamRoleDto,
+  DeleteWorkspaceDto,
+} from '@gitroom/nestjs-libraries/dtos/settings/team-management.dto';
+import { assertWorkspaceAdmin } from '@gitroom/nestjs-libraries/database/prisma/organizations/workspace-access';
 import { ApiTags } from '@nestjs/swagger';
-import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import {
+  AuthorizationActions,
+  Sections,
+} from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 @ApiTags('Settings')
 @Controller('/settings')
 export class SettingsController {
-  constructor(
-    private _organizationService: OrganizationService
-  ) {}
+  constructor(private _organizationService: OrganizationService) {}
 
   @Get('/workspace')
   getWorkspace(@GetOrgFromRequest() org: Organization) {
@@ -42,7 +48,9 @@ export class SettingsController {
     // Self-hosted installs bypass plan policies; enforce the role here too.
     const role = org.users?.[0]?.role;
     if (!user.isSuperAdmin && role !== Role.ADMIN && role !== Role.SUPERADMIN) {
-      throw new ForbiddenException('Only workspace admins can rename this workspace');
+      throw new ForbiddenException(
+        'Only workspace admins can rename this workspace'
+      );
     }
 
     return this._organizationService.updateWorkspaceName(org.id, body.name);
@@ -53,7 +61,11 @@ export class SettingsController {
     [AuthorizationActions.Create, Sections.TEAM_MEMBERS],
     [AuthorizationActions.Create, Sections.ADMIN]
   )
-  async getTeam(@GetOrgFromRequest() org: Organization) {
+  async getTeam(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User
+  ) {
+    assertWorkspaceAdmin(org, user);
     return this._organizationService.getTeam(org.id);
   }
 
@@ -90,9 +102,79 @@ export class SettingsController {
   )
   deleteTeamMember(
     @GetOrgFromRequest() org: Organization,
-    @Param('id') id: string
+    @Param('id') id: string,
+    @GetUserFromRequest() user: User
   ) {
-    return this._organizationService.deleteTeamMember(org, id);
+    return this._organizationService.deleteTeamMember(org, id, user);
+  }
+
+  @Post('/workspaces')
+  createWorkspace(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @Body() body: WorkspaceSettingsDto
+  ) {
+    return this._organizationService.createWorkspace(org, user, body.name);
+  }
+
+  @Delete('/workspace')
+  deleteWorkspace(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @Body() body: DeleteWorkspaceDto
+  ) {
+    return this._organizationService.removeWorkspace(org, user, body.name);
+  }
+
+  @Put('/team/:id/role')
+  changeTeamRole(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @Param('id') id: string,
+    @Body() body: TeamRoleDto
+  ) {
+    return this._organizationService.changeTeamRole(org, user, id, body.role);
+  }
+
+  @Post('/workspace/leave')
+  leaveWorkspace(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User
+  ) {
+    return this._organizationService.leaveWorkspace(org, user);
+  }
+
+  @Get('/team/invitations')
+  listInvitations(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User
+  ) {
+    return this._organizationService.listInvitations(org, user);
+  }
+
+  @Post('/team/invitations/:id/:action')
+  invitationAction(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @Param('id') id: string,
+    @Param('action') action: string
+  ) {
+    if (!['copy', 'resend', 'revoke'].includes(action))
+      throw new HttpException('Unknown invitation action', 400);
+    return this._organizationService.invitationAction(
+      org,
+      user,
+      id,
+      action as 'copy' | 'resend' | 'revoke'
+    );
+  }
+
+  @Get('/team/audit')
+  teamAudit(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User
+  ) {
+    return this._organizationService.teamAudit(org, user);
   }
 
   @Get('/shortlink')

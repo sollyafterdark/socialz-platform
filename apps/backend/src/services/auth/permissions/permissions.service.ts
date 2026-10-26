@@ -52,7 +52,13 @@ export class PermissionsService {
       !process.env.STRIPE_PUBLISHABLE_KEY
     ) {
       for (const [action, section] of requestedPermission) {
-        can(action, section);
+        // Self-hosting removes plan limits, never workspace role restrictions.
+        if (
+          section !== Sections.ADMIN ||
+          ['ADMIN', 'SUPERADMIN'].includes(permission)
+        ) {
+          can(action, section);
+        }
       }
       return build({
         detectSubjectType: (item) =>

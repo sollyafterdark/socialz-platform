@@ -1,6 +1,19 @@
-import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
-import { Role, ShortLinkPreference, SubscriptionTier } from '@prisma/client';
-import { Injectable } from '@nestjs/common';
+import {
+  PrismaRepository,
+  PrismaTransaction,
+} from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import {
+  Prisma,
+  Provider,
+  Role,
+  ShortLinkPreference,
+  SubscriptionTier,
+} from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
@@ -11,7 +24,8 @@ export class OrganizationRepository {
   constructor(
     private _organization: PrismaRepository<'organization'>,
     private _userOrg: PrismaRepository<'userOrganization'>,
-    private _user: PrismaRepository<'user'>
+    private _user: PrismaRepository<'user'>,
+    private _transactions: PrismaTransaction
   ) {}
 
   createMaxUser(id: string, name: string, saasName: string, email: string) {
@@ -414,8 +428,37 @@ export class OrganizationRepository {
   getUsersByEmail(email: string) {
     return this._user.model.user.findMany({
       where: {
-        email,
+        email: { equals: email.trim(), mode: 'insensitive' },
+        deletedAt: null,
+        activated: true,
       },
+    });
+  }
+
+  private async createMembership(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    id: string,
+    orgId: string,
+    role: 'USER' | 'ADMIN'
+  ) {
+    const org = await tx.organization.findFirst({
+      where: { id: orgId, deletedAt: null },
+      include: { subscription: true },
+    });
+    if (
+      !org ||
+      (process.env.STRIPE_PUBLISHABLE_KEY &&
+        org.subscription?.subscriptionTier === SubscriptionTier.STANDARD)
+    ) {
+      throw new BadRequestException('This workspace cannot accept members');
+    }
+    const member = await tx.userOrganization.findUnique({
+      where: { userId_organizationId: { userId, organizationId: orgId } },
+    });
+    if (member) return false; // An invitation never changes an existing role.
+    return tx.userOrganization.create({
+      data: { role, userId, organizationId: orgId },
     });
   }
 
@@ -425,52 +468,499 @@ export class OrganizationRepository {
     orgId: string,
     role: 'USER' | 'ADMIN'
   ) {
-    const checkIfInviteExists = await this._user.model.user.findFirst({
+    return this._transactions.model.$transaction(async (tx) => {
+      const member = await this.createMembership(tx, userId, id, orgId, role);
+      if (member)
+        await tx.teamAudit.create({
+          data: {
+            organizationId: orgId,
+            actorId: userId,
+            action: 'MEMBER_ADDED',
+            target:
+              (
+                await tx.user.findUnique({
+                  where: { id: userId },
+                  select: { email: true },
+                })
+              )?.email || userId,
+          },
+        });
+      return member;
+    });
+  }
+
+  async validInvitation(
+    details: { id: string; orgId: string; role: string; email: string },
+    email?: string,
+    tx?: Prisma.TransactionClient
+  ) {
+    const db =
+      tx || (this._transactions.model as unknown as Prisma.TransactionClient);
+    // PrismaTransaction exposes the same client; use a transaction when no client was passed.
+    if (!tx)
+      return this._transactions.model.$transaction((inner) =>
+        this.validInvitation(details, email, inner)
+      );
+    const invite = await db.teamInvitation.findFirst({
       where: {
-        inviteId: id,
+        id: details.id,
+        organizationId: details.orgId,
+        role: details.role as Role,
+        revokedAt: null,
+        acceptedAt: null,
+        expiresAt: { gt: new Date() },
+        organization: { deletedAt: null },
       },
     });
-
-    if (checkIfInviteExists) {
-      return false;
+    if (
+      !invite ||
+      invite.email !== details.email?.trim().toLowerCase() ||
+      (email && invite.email !== email.trim().toLowerCase())
+    ) {
+      throw new BadRequestException(
+        'Invitation is expired, revoked, already used, or belongs to another email address'
+      );
     }
-
-    const checkForSubscription =
-      await this._organization.model.organization.findFirst({
-        where: {
-          id: orgId,
+    const issuer = await db.user.findFirst({
+      where: { id: invite.invitedBy, activated: true, deletedAt: null },
+      include: {
+        organizations: {
+          where: { organizationId: invite.organizationId, disabled: false },
         },
-        select: {
-          subscription: true,
+      },
+    });
+    if (
+      !issuer ||
+      (!issuer.isSuperAdmin &&
+        (invite.role === 'ADMIN' ||
+          !issuer.organizations.some((m) =>
+            ['ADMIN', 'SUPERADMIN'].includes(m.role)
+          )))
+    ) {
+      throw new BadRequestException(
+        'The invitation sender no longer has permission to invite this role'
+      );
+    }
+    return invite;
+  }
+
+  async acceptInvitation(
+    userId: string,
+    details: {
+      id: string;
+      orgId: string;
+      role: 'USER' | 'ADMIN';
+      email: string;
+    }
+  ) {
+    return this._transactions.model.$transaction(async (tx) => {
+      const user = await tx.user.findFirst({
+        where: { id: userId, activated: true, deletedAt: null },
+      });
+      if (!user)
+        throw new BadRequestException(
+          'Activate your account before joining a workspace'
+        );
+      const invite = await this.validInvitation(details, user.email, tx);
+      const claimed = await tx.teamInvitation.updateMany({
+        where: {
+          id: invite.id,
+          acceptedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { acceptedAt: new Date(), acceptedBy: userId },
+      });
+      if (claimed.count !== 1)
+        throw new BadRequestException('Invitation has already been used');
+      const member = await this.createMembership(
+        tx,
+        userId,
+        invite.id,
+        invite.organizationId,
+        invite.role as 'USER' | 'ADMIN'
+      );
+      await tx.teamAudit.create({
+        data: {
+          organizationId: invite.organizationId,
+          actorId: userId,
+          action: 'INVITATION_ACCEPTED',
+          target:
+            (
+              await tx.user.findUnique({
+                where: { id: userId },
+                select: { email: true },
+              })
+            )?.email || userId,
         },
       });
+      return member || { organizationId: invite.organizationId };
+    });
+  }
 
-    if (
-      process.env.STRIPE_PUBLISHABLE_KEY &&
-      checkForSubscription?.subscription?.subscriptionTier ===
-        SubscriptionTier.STANDARD
-    ) {
-      return false;
+  async createInvitedUser(
+    body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
+    hasEmail: boolean,
+    ip: string,
+    agent: string,
+    details: {
+      id: string;
+      orgId: string;
+      role: 'USER' | 'ADMIN';
+      email: string;
     }
-
-    const create = await this._userOrg.model.userOrganization.create({
-      data: {
-        role,
-        userId,
-        organizationId: orgId,
-      },
+  ) {
+    // Account creation, single-use invitation claim and membership commit together. Local login still requires email activation.
+    return this._transactions.model.$transaction(async (tx) => {
+      await this.validInvitation(details, body.email, tx);
+      const user = await tx.user.create({
+        data: {
+          email: body.email.trim().toLowerCase(),
+          password: body.password
+            ? AuthService.hashPassword(body.password)
+            : '',
+          providerName: body.provider,
+          providerId: body.providerId || '',
+          activated: body.provider !== Provider.LOCAL || !hasEmail,
+          timezone: 0,
+          ip,
+          agent,
+        },
+      });
+      const claimed = await tx.teamInvitation.updateMany({
+        where: {
+          id: details.id,
+          acceptedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { acceptedAt: new Date(), acceptedBy: user.id },
+      });
+      if (claimed.count !== 1)
+        throw new BadRequestException('Invitation has already been used');
+      const membership = await this.createMembership(
+        tx,
+        user.id,
+        details.id,
+        details.orgId,
+        details.role
+      );
+      await tx.teamAudit.create({
+        data: {
+          organizationId: details.orgId,
+          actorId: user.id,
+          action: 'INVITATION_ACCEPTED',
+          target: user.email,
+        },
+      });
+      return { user, membership };
     });
+  }
 
-    await this._user.model.user.update({
-      where: {
-        id: userId,
-      },
-      data: {
-        inviteId: id,
-      },
+  createInvitation(data: Prisma.TeamInvitationUncheckedCreateInput) {
+    return this._transactions.model.$transaction(async (tx) => {
+      const invite = await tx.teamInvitation.create({ data });
+      await tx.teamAudit.create({
+        data: {
+          organizationId: invite.organizationId,
+          actorId: invite.invitedBy,
+          action: 'INVITATION_CREATED',
+          target: invite.email + ':' + invite.role,
+        },
+      });
+      return invite;
     });
+  }
 
-    return create;
+  listInvitations(orgId: string) {
+    return this._transactions.model.$transaction((tx) =>
+      tx.teamInvitation.findMany({
+        where: { organizationId: orgId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          expiresAt: true,
+          acceptedAt: true,
+          revokedAt: true,
+          createdAt: true,
+        },
+      })
+    );
+  }
+
+  getInvitation(orgId: string, id: string) {
+    return this._transactions.model.$transaction((tx) =>
+      tx.teamInvitation.findFirst({ where: { id, organizationId: orgId } })
+    );
+  }
+
+  revokeInvitation(orgId: string, id: string, actorId: string) {
+    return this._transactions.model.$transaction(async (tx) => {
+      const result = await tx.teamInvitation.updateMany({
+        where: { id, organizationId: orgId, acceptedAt: null, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      if (result.count)
+        await tx.teamAudit.create({
+          data: {
+            organizationId: orgId,
+            actorId,
+            action: 'INVITATION_REVOKED',
+            target: id,
+          },
+        });
+      return { revoked: result.count > 0 };
+    });
+  }
+
+  teamAudit(orgId: string) {
+    return this._transactions.model.$transaction((tx) =>
+      tx.teamAudit.findMany({
+        where: { organizationId: orgId },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+          id: true,
+          action: true,
+          target: true,
+          actorId: true,
+          createdAt: true,
+        },
+      })
+    );
+  }
+
+  async createWorkspace(name: string, creatorId: string) {
+    return this._transactions.model.$transaction(async (tx) => {
+      const owners = await tx.user.findMany({
+        where: { isSuperAdmin: true, activated: true, deletedAt: null },
+        select: { id: true },
+      });
+      if (owners.length !== 1)
+        throw new BadRequestException(
+          'Contact the Socialz owner to create this workspace'
+        );
+      const ownerId = owners[0].id;
+      const workspace = await tx.organization.create({
+        data: {
+          name,
+          apiKey: AuthService.fixedEncryption(makeSecureId(20)),
+          users: {
+            create: [
+              { userId: ownerId, role: Role.SUPERADMIN },
+              ...(creatorId === ownerId
+                ? []
+                : [{ userId: creatorId, role: Role.ADMIN }]),
+            ],
+          },
+        },
+        select: { id: true, name: true },
+      });
+      await tx.teamAudit.create({
+        data: {
+          organizationId: workspace.id,
+          actorId: creatorId,
+          action: 'WORKSPACE_CREATED',
+        },
+      });
+      return workspace;
+    });
+  }
+
+  async manageMember(
+    orgId: string,
+    actor: { id: string; isSuperAdmin: boolean },
+    targetId: string,
+    role?: 'USER' | 'ADMIN'
+  ) {
+    return this._transactions.model.$transaction(async (tx) => {
+      const target = await tx.userOrganization.findUnique({
+        where: {
+          userId_organizationId: { userId: targetId, organizationId: orgId },
+        },
+        include: { user: { select: { isSuperAdmin: true, email: true } } },
+      });
+      if (!target)
+        throw new BadRequestException('User is not a member of this workspace');
+      if (target.user.isSuperAdmin || target.role === 'SUPERADMIN')
+        throw new ForbiddenException(
+          'The Socialz owner cannot be removed or demoted'
+        );
+      if (targetId === actor.id)
+        throw new ForbiddenException(
+          'Use Leave workspace to remove your own membership'
+        );
+      if (!actor.isSuperAdmin) {
+        const member = await tx.userOrganization.findUnique({
+          where: {
+            userId_organizationId: { userId: actor.id, organizationId: orgId },
+          },
+        });
+        if (
+          role ||
+          !member ||
+          member.disabled ||
+          !['ADMIN', 'SUPERADMIN'].includes(member.role) ||
+          target.role !== 'USER'
+        )
+          throw new ForbiddenException(
+            'Only the Socialz owner can manage administrators'
+          );
+      }
+      if (role)
+        await tx.userOrganization.update({
+          where: { id: target.id },
+          data: { role },
+        });
+      else await tx.userOrganization.delete({ where: { id: target.id } });
+      await tx.teamAudit.create({
+        data: {
+          organizationId: orgId,
+          actorId: actor.id,
+          action: role ? 'ROLE_CHANGED' : 'MEMBER_REMOVED',
+          target: target.user.email + (role ? ':' + role : ''),
+        },
+      });
+      return { updated: true };
+    });
+  }
+
+  async leaveWorkspace(orgId: string, userId: string) {
+    return this._transactions.model.$transaction(
+      async (tx) => {
+        const membership = await tx.userOrganization.findUnique({
+          where: { userId_organizationId: { userId, organizationId: orgId } },
+          include: { user: { select: { isSuperAdmin: true, email: true } } },
+        });
+        if (
+          !membership ||
+          membership.role === 'SUPERADMIN' ||
+          membership.user.isSuperAdmin
+        )
+          throw new ForbiddenException(
+            'The Socialz owner must remain in this workspace'
+          );
+        const others = await tx.userOrganization.count({
+          where: {
+            userId,
+            organizationId: { not: orgId },
+            disabled: false,
+            organization: { deletedAt: null },
+          },
+        });
+        if (!others)
+          throw new BadRequestException(
+            'You must belong to another workspace before leaving this one'
+          );
+        await tx.userOrganization.delete({ where: { id: membership.id } });
+        await tx.teamAudit.create({
+          data: {
+            organizationId: orgId,
+            actorId: userId,
+            action: 'MEMBER_LEFT',
+            target:
+              (
+                await tx.user.findUnique({
+                  where: { id: userId },
+                  select: { email: true },
+                })
+              )?.email || userId,
+          },
+        });
+        return { left: true };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
+  }
+
+  async removeWorkspace(orgId: string, name: string, actorId: string) {
+    return this._transactions.model.$transaction(
+      async (tx) => {
+        const org = await tx.organization.findFirst({
+          where: { id: orgId, deletedAt: null },
+        });
+        if (!org || org.name !== name)
+          throw new BadRequestException(
+            'Type the exact workspace name to confirm deletion'
+          );
+        const others = await tx.userOrganization.count({
+          where: {
+            userId: actorId,
+            organizationId: { not: orgId },
+            disabled: false,
+            organization: { deletedAt: null },
+          },
+        });
+        if (!others)
+          throw new BadRequestException(
+            'Your final workspace cannot be deleted'
+          );
+        if (
+          (await tx.post.count({
+            where: {
+              organizationId: orgId,
+              deletedAt: null,
+              OR: [{ state: 'QUEUE' }, { intervalInDays: { not: null } }],
+            },
+          })) ||
+          (await tx.autoPost.count({
+            where: { organizationId: orgId, deletedAt: null, active: true },
+          }))
+        ) {
+          throw new BadRequestException(
+            'Cancel scheduled and repeating posts and disable auto-posting before deleting this workspace'
+          );
+        }
+        const members = await tx.userOrganization.findMany({
+          where: { organizationId: orgId, disabled: false },
+        });
+        for (const member of members) {
+          if (
+            !(await tx.userOrganization.count({
+              where: {
+                userId: member.userId,
+                organizationId: { not: orgId },
+                disabled: false,
+                organization: { deletedAt: null },
+              },
+            }))
+          )
+            throw new BadRequestException(
+              'Every member must join another workspace before this workspace can be deleted'
+            );
+        }
+        const now = new Date();
+        await tx.integration.updateMany({
+          where: { organizationId: orgId, deletedAt: null },
+          data: { disabled: true, deletedAt: now },
+        });
+        await tx.autoPost.updateMany({
+          where: { organizationId: orgId, deletedAt: null },
+          data: { active: false, deletedAt: now },
+        });
+        await tx.teamInvitation.updateMany({
+          where: { organizationId: orgId, acceptedAt: null, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        await tx.organization.update({
+          where: { id: orgId },
+          data: { deletedAt: now },
+        });
+        await tx.teamAudit.create({
+          data: {
+            organizationId: orgId,
+            actorId,
+            action: 'WORKSPACE_DELETED',
+            target: name,
+          },
+        });
+        return { deleted: true };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
   }
 
   async createOrgAndUser(
@@ -576,12 +1066,14 @@ export class OrganizationRepository {
       },
       select: {
         users: {
+          where: { disabled: false, user: { deletedAt: null } },
           select: {
             role: true,
             user: {
               select: {
                 email: true,
                 id: true,
+                isSuperAdmin: true,
                 sendSuccessEmails: true,
                 sendFailureEmails: true,
                 sendStreakEmails: true,
