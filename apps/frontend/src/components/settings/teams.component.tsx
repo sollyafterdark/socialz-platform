@@ -1,14 +1,14 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@gitroom/react/form/button';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import useSWR from 'swr';
-import React, { useCallback, useMemo } from 'react';
+import useSWR, { useSWRConfig } from 'swr';
+import React, { useMemo, useState } from 'react';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
-import { capitalize } from 'lodash';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { Input } from '@gitroom/react/form/input';
-import { useForm, FormProvider, useWatch } from 'react-hook-form';
+import { useForm, FormProvider } from 'react-hook-form';
 import { Select } from '@gitroom/react/form/select';
 import { Checkbox } from '@gitroom/react/form/checkbox';
 import { classValidatorResolver } from '@hookform/resolvers/class-validator';
@@ -16,222 +16,452 @@ import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.te
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import copy from 'copy-to-clipboard';
-import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { WorkspaceSettings } from './workspace-settings.component';
+import { WorkspaceActions } from './workspace-actions.component';
 
-const roles = [
-  {
-    name: 'User',
-    value: 'USER',
-  },
-  {
-    name: 'Admin',
-    value: 'ADMIN',
-  },
-];
+type TeamRole = 'USER' | 'ADMIN' | 'SUPERADMIN';
+type Member = {
+  role: TeamRole;
+  user: { id: string; email: string; isSuperAdmin?: boolean };
+};
+type Invitation = {
+  id: string;
+  email: string;
+  role: TeamRole;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+};
+
 export const AddMember = () => {
+  const user = useUser();
   const modals = useModals();
   const fetch = useFetch();
   const toast = useToaster();
-  const resolver = useMemo(() => {
-    return classValidatorResolver(AddTeamMemberDto);
-  }, []);
-  const form = useForm({
-    values: {
-      email: '',
-      role: '',
-      sendEmail: true,
+  const { mutate } = useSWRConfig();
+  const { data: workspaces, error: workspaceError } = useSWR<
+    { id: string; name: string }[]
+  >(
+    'organizations',
+    async () => {
+      const response = await fetch('/user/organizations');
+      if (!response.ok) throw new Error('Could not load workspaces');
+      return response.json();
     },
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
+    }
+  );
+  const workspace = Array.isArray(workspaces)
+    ? workspaces.find((current) => current.id === user?.orgId)
+    : undefined;
+  const workspaceUnavailable =
+    !!workspaceError || (Array.isArray(workspaces) && !workspace);
+  const [existing, setExisting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const resolver = useMemo(() => classValidatorResolver(AddTeamMemberDto), []);
+  const form = useForm({
+    defaultValues: { email: '', role: 'USER', sendEmail: true },
     resolver,
     mode: 'onChange',
   });
-  const sendEmail = useWatch({
-    control: form.control,
-    name: 'sendEmail',
-  });
-  const submit = useCallback(
-    async (values: { email: string; role: string; sendEmail: boolean }) => {
-      const response = await fetch('/settings/team', {
-        method: 'POST',
-        body: JSON.stringify(values),
-      });
-      if (!response.ok) {
-        const { message } = await response.json().catch(() => ({} as any));
-        toast.show(
-          (Array.isArray(message) ? message[0] : message) ||
-            t('could_not_send_invitation', 'Could not send the invitation'),
-          'warning'
+  const sendEmail = form.watch('sendEmail');
+  const submit = async (values: {
+    email: string;
+    role: string;
+    sendEmail: boolean;
+  }) => {
+    if (!workspace || workspaceError) {
+      setError(
+        'Could not confirm the workspace. Refresh this page before adding a member.'
+      );
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(
+        existing ? '/settings/team/add' : '/settings/team',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            ...values,
+            expectedWorkspaceId: workspace.id,
+          }),
+        }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(
+          (Array.isArray(result.message)
+            ? result.message[0]
+            : result.message) || 'Could not add the member'
         );
-        return;
-      }
-      const { url } = await response.json();
-      if (values.sendEmail) {
-        modals.closeAll();
-        toast.show(t('invitation_link_sent', 'Invitation link sent'));
-        return;
-      }
-      copy(url);
+      if (!existing && !values.sendEmail && !copy(result.url))
+        throw new Error(
+          'Could not copy the invitation. Use Copy link in Invitations.'
+        );
+      await mutate(`/api/teams?workspace=${user?.orgId}`);
+      await mutate(`/settings/team/invitations?workspace=${user?.orgId}`);
       modals.closeAll();
-      toast.show(t('link_copied_to_clipboard', 'Link copied to clipboard'));
-    },
-    []
-  );
-
-  const t = useT();
-
+      toast.show(
+        existing
+          ? 'Member added'
+          : values.sendEmail
+          ? 'Invitation email sent'
+          : 'Invitation link copied'
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add the member');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <FormProvider {...form}>
       <form onSubmit={form.handleSubmit(submit)}>
-        <div className="relative flex gap-[10px] flex-col flex-1 p-[16px] pt-0">
-          {sendEmail && (
-            <Input
-              label="Email"
-              placeholder={t('enter_email', 'Enter email')}
-              name="email"
-            />
+        <div className="relative flex gap-[12px] flex-col p-[16px] pt-0">
+          <section
+            aria-label="Destination workspace"
+            className="bg-sixth border border-fifth rounded-[8px] p-[12px] flex flex-col gap-[6px]"
+          >
+            <span className="text-[13px] text-customColor18">Workspace</span>
+            <strong>
+              {workspace?.name ||
+                (workspaceUnavailable
+                  ? 'Workspace unavailable'
+                  : 'Loading workspace…')}
+            </strong>
+            <p className="text-[12px] text-customColor18">
+              This person will join this workspace only. To invite them to
+              another workspace, close this dialog and switch teams in the top
+              bar.
+            </p>
+            {workspaceUnavailable && (
+              <p role="alert">
+                Could not load the workspace. Refresh this page before adding a
+                member.
+              </p>
+            )}
+          </section>
+          {user?.isSuperAdmin && (
+            <label className="flex flex-col gap-[8px]">
+              Add method
+              <select
+                className="bg-sixth border border-fifth rounded-[4px] p-[8px]"
+                aria-label="Add method"
+                value={existing ? 'existing' : 'invite'}
+                onChange={(e) => setExisting(e.target.value === 'existing')}
+              >
+                <option value="invite">Invite by email or link</option>
+                <option value="existing">
+                  Add an existing Socialz account
+                </option>
+              </select>
+            </label>
           )}
-          <Select label="Role" name="role">
-            <option value="">{t('select_role', 'Select Role')}</option>
-            {roles.map((role) => (
-              <option key={role.value} value={role.value}>
-                {role.name}
-              </option>
-            ))}
+          <Input
+            label="Email"
+            placeholder="Enter the member’s email"
+            name="email"
+          />
+          <Select label="Workspace role" name="role">
+            <option value="USER">User</option>
+            {user?.isSuperAdmin && <option value="ADMIN">Admin</option>}
           </Select>
-          <div className="flex gap-[5px]">
-            <div>
-              <Checkbox name="sendEmail" />
-            </div>
-            <div>
-              {t('send_invitation_via_email', 'Send invitation via email?')}
-            </div>
-          </div>
-          <Button type="submit" className="mt-[18px]">
-            {sendEmail ? t('send_invitation_link', 'Send Invitation Link') : t('copy_link', 'Copy Link')}
+          {!existing && (
+            <>
+              <label className="flex items-center gap-[8px]">
+                <Checkbox name="sendEmail" />
+                Send invitation by email
+              </label>
+              <p className="text-[13px] text-customColor18">
+                The recipient must use this email address. The link works once
+                and expires in 2 days.
+              </p>
+            </>
+          )}
+          {error && (
+            <p role="alert" className="text-red-400">
+              {error}
+            </p>
+          )}
+          <Button
+            type="submit"
+            disabled={busy || !workspace || !!workspaceError}
+            loading={busy}
+          >
+            {existing
+              ? 'Add member'
+              : sendEmail
+              ? 'Send invitation'
+              : 'Copy invitation link'}
           </Button>
         </div>
       </form>
     </FormProvider>
   );
 };
+
 export const TeamsComponent = () => {
+  const invitationUnavailable =
+    useSearchParams()?.get('invitation') === 'unavailable';
   const fetch = useFetch();
   const user = useUser();
   const modals = useModals();
-  const t = useT();
-  const myLevel = user?.role === 'USER' ? 0 : user?.role === 'ADMIN' ? 1 : 2;
-  const getLevel = useCallback(
-    (role: 'USER' | 'ADMIN' | 'SUPERADMIN') =>
-      role === 'USER' ? 0 : role === 'ADMIN' ? 1 : 2,
-    []
+  const toast = useToaster();
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const canManage =
+    !!user?.isSuperAdmin || ['ADMIN', 'SUPERADMIN'].includes(user?.role || '');
+  const load = async (path: string) => {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error('Could not load team details');
+    return response.json();
+  };
+  const {
+    data,
+    error: loadError,
+    mutate,
+  } = useSWR<{ users: Member[] }>(
+    canManage ? `/api/teams?workspace=${user?.orgId}` : null,
+    () => load('/settings/team')
   );
-  const loadTeam = useCallback(async () => {
-    return (await (await fetch('/settings/team')).json()).users as Array<{
-      id: string;
-      role: 'SUPERADMIN' | 'ADMIN' | 'USER';
-      user: {
-        email: string;
-        id: string;
-      };
-    }>;
-  }, []);
-  const addMember = useCallback(() => {
-    modals.openModal({
-      classNames: {
-        modal: 'bg-transparent text-textColor',
-      },
-      title: t('top_title_add_member', 'Add Member'),
-      withCloseButton: true,
-      children: <AddMember />,
-    });
-  }, [t]);
-  const { data, mutate } = useSWR('/api/teams', loadTeam, {
-    revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-    revalidateIfStale: false,
-  });
-  const remove = useCallback(
-    (toRemove: {
-        user: {
-          id: string;
-        };
-      }) =>
-      async () => {
-        if (
-          !(await deleteDialog(
-            t('are_you_sure_remove_team_member', 'Are you sure you want to remove this team member?')
-          ))
-        ) {
-          return;
-        }
-        await fetch(`/settings/team/${toRemove.user.id}`, {
-          method: 'DELETE',
-        });
-        await mutate();
-      },
-    [t]
+  const { data: invitations, mutate: reloadInvitations } = useSWR<Invitation[]>(
+    canManage ? `/settings/team/invitations?workspace=${user?.orgId}` : null,
+    () => load('/settings/team/invitations')
   );
-
+  const { data: audit, mutate: reloadAudit } = useSWR<
+    Array<{ id: string; action: string; target: string; createdAt: string }>
+  >(canManage ? `/settings/team/audit?workspace=${user?.orgId}` : null, () =>
+    load('/settings/team/audit')
+  );
+  const action = async (path: string, method: string, body?: object) => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(path, {
+        method,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(
+          (Array.isArray(result.message)
+            ? result.message[0]
+            : result.message) || 'Could not update team'
+        );
+      if (result.url && !path.endsWith('/resend')) {
+        if (!copy(result.url)) throw new Error('Could not copy link');
+        toast.show('Invitation link copied');
+      } else if (path.endsWith('/resend')) toast.show('Invitation email sent');
+      await Promise.all([mutate(), reloadInvitations(), reloadAudit()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update team');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const invitationNotice = invitationUnavailable ? (
+    <p role="alert" className="text-red-400 mb-[16px]">
+      This invitation could not be accepted. Sign in with the invited email
+      address or ask an Admin for a new link.
+    </p>
+  ) : null;
+  if (!canManage)
+    return (
+      <>
+        {invitationNotice}
+        <WorkspaceActions />
+      </>
+    );
   return (
     <div className="flex flex-col">
-      <h3 className="text-[20px]">{t('team_members', 'Team Members')}</h3>
-      <div className="text-customColor18 mt-[4px]">
-        {t(
-          'invite_your_assistant_or_team_member_to_manage_your_account',
-          'Invite your assistant or team member to manage your account'
+      {invitationNotice}
+      <WorkspaceSettings />
+      <WorkspaceActions />
+      <h3 className="text-[20px]">Team Members</h3>
+      <p className="text-[13px] text-customColor18 mt-[4px]">
+        Admins manage Users. Only the Socialz owner can promote, demote, or
+        remove Admins.
+      </p>
+      <div className="my-[16px] bg-sixth border border-fifth rounded-[8px] p-[20px] flex flex-col gap-[16px]">
+        {loadError && (
+          <p role="alert">Could not load members. Please refresh.</p>
         )}
-      </div>
-      <div className="my-[16px] mt-[16px] bg-sixth border-fifth border rounded-[4px] p-[24px] flex flex-col gap-[24px]">
-        <div className="flex flex-col gap-[16px]">
-          {(data || []).map((p) => (
-            <div key={p.user.id} className="flex items-center">
-              <div className="flex-1">
-                {capitalize(p.user.email.split('@')[0]).split('.')[0]}
-              </div>
-              <div className="flex-1">
-                {p.role === 'USER'
-                  ? t('user', 'User')
-                  : p.role === 'ADMIN'
-                  ? t('admin', 'Admin')
-                  : t('super_admin', 'Super Admin')}
-              </div>
-              {+myLevel > +getLevel(p.role) ? (
-                <div className="flex-1 flex justify-end">
-                  <Button
-                    className={`!bg-customColor3 !h-[24px] border border-customColor21 rounded-[4px] text-[12px]`}
-                    onClick={remove(p)}
-                    secondary={true}
-                  >
-                    <div className="flex justify-center items-center gap-[4px]">
-                      <div>
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="14"
-                          height="15"
-                          viewBox="0 0 14 15"
-                          fill="none"
-                        >
-                          <path
-                            d="M11.8125 3.125H9.625V2.6875C9.625 2.3394 9.48672 2.00556 9.24058 1.75942C8.99444 1.51328 8.6606 1.375 8.3125 1.375H5.6875C5.3394 1.375 5.00556 1.51328 4.75942 1.75942C4.51328 2.00556 4.375 2.3394 4.375 2.6875V3.125H2.1875C2.07147 3.125 1.96019 3.17109 1.87814 3.25314C1.79609 3.33519 1.75 3.44647 1.75 3.5625C1.75 3.67853 1.79609 3.78981 1.87814 3.87186C1.96019 3.95391 2.07147 4 2.1875 4H2.625V11.875C2.625 12.1071 2.71719 12.3296 2.88128 12.4937C3.04538 12.6578 3.26794 12.75 3.5 12.75H10.5C10.7321 12.75 10.9546 12.6578 11.1187 12.4937C11.2828 12.3296 11.375 12.1071 11.375 11.875V4H11.8125C11.9285 4 12.0398 3.95391 12.1219 3.87186C12.2039 3.78981 12.25 3.67853 12.25 3.5625C12.25 3.44647 12.2039 3.33519 12.1219 3.25314C12.0398 3.17109 11.9285 3.125 11.8125 3.125ZM5.25 2.6875C5.25 2.57147 5.29609 2.46019 5.37814 2.37814C5.46019 2.29609 5.57147 2.25 5.6875 2.25H8.3125C8.42853 2.25 8.53981 2.29609 8.62186 2.37814C8.70391 2.46019 8.75 2.57147 8.75 2.6875V3.125H5.25V2.6875ZM10.5 11.875H3.5V4H10.5V11.875ZM6.125 6.1875V9.6875C6.125 9.80353 6.07891 9.91481 5.99686 9.99686C5.91481 10.0789 5.80353 10.125 5.6875 10.125C5.57147 10.125 5.46019 10.0789 5.37814 9.99686C5.29609 9.91481 5.25 9.80353 5.25 9.6875V6.1875C5.25 6.07147 5.29609 5.96019 5.37814 5.87814C5.46019 5.79609 5.57147 5.75 5.6875 5.75C5.80353 5.75 5.91481 5.79609 5.99686 5.87814C6.07891 5.96019 6.125 6.07147 6.125 6.1875ZM8.75 6.1875V9.6875C8.75 9.80353 8.70391 9.91481 8.62186 9.99686C8.53981 10.0789 8.42853 10.125 8.3125 10.125C8.19647 10.125 8.08519 10.0789 8.00314 9.99686C7.92109 9.91481 7.875 9.80353 7.875 9.6875V6.1875C7.875 6.07147 7.92109 5.96019 8.00314 5.87814C8.08519 5.79609 8.19647 5.75 8.3125 5.75C8.42853 5.75 8.53981 5.79609 8.62186 5.87814C8.70391 5.96019 8.75 6.07147 8.75 6.1875Z"
-                            fill="currentColor"
-                          />
-                        </svg>
-                      </div>
-                      <div>{t('remove', 'Remove')}</div>
-                    </div>
-                  </Button>
-                </div>
+        {(data?.users || []).map((member) => {
+          const protectedOwner =
+            member.user.isSuperAdmin || member.role === 'SUPERADMIN';
+          const canRemove =
+            !protectedOwner &&
+            member.user.id !== user?.id &&
+            (user?.isSuperAdmin || member.role === 'USER');
+          return (
+            <div
+              key={member.user.id}
+              className="flex flex-wrap items-center gap-[12px]"
+            >
+              <span className="flex-1 min-w-[160px] break-all text-[13px]">
+                {member.user.email}
+                {member.user.id === user?.id ? ' (you)' : ''}
+              </span>
+              {user?.isSuperAdmin &&
+              !protectedOwner &&
+              member.user.id !== user?.id ? (
+                <select
+                  aria-label={`Role for ${member.user.email}`}
+                  className="bg-sixth border border-fifth rounded-[4px] p-[8px]"
+                  value={member.role}
+                  disabled={busy}
+                  onChange={async (e) => {
+                    const role = e.target.value;
+                    if (
+                      await deleteDialog(
+                        `Change ${member.user.email} to ${
+                          role === 'ADMIN' ? 'Admin' : 'User'
+                        } in this workspace?`
+                      )
+                    )
+                      await action(
+                        `/settings/team/${member.user.id}/role`,
+                        'PUT',
+                        { role }
+                      );
+                  }}
+                >
+                  <option value="USER">User</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
               ) : (
-                <div className="flex-1" />
+                <span className="text-[13px]">
+                  {protectedOwner
+                    ? 'Owner'
+                    : member.role === 'ADMIN'
+                    ? 'Admin'
+                    : 'User'}
+                </span>
+              )}
+              {canRemove && (
+                <Button
+                  secondary
+                  disabled={busy}
+                  onClick={async () => {
+                    if (
+                      await deleteDialog(
+                        `Remove ${member.user.email} from this workspace? Their account and other workspace memberships stay active.`
+                      )
+                    )
+                      await action(
+                        `/settings/team/${member.user.id}`,
+                        'DELETE'
+                      );
+                  }}
+                >
+                  Remove
+                </Button>
               )}
             </div>
-          ))}
-        </div>
+          );
+        })}
         <div>
-          <Button onClick={addMember}>
-            {t('add_another_member', 'Add another member')}
+          <Button
+            onClick={() =>
+              modals.openModal({
+                classNames: { modal: 'bg-transparent text-textColor' },
+                title: 'Add Member',
+                withCloseButton: true,
+                children: <AddMember />,
+              })
+            }
+          >
+            Add member
           </Button>
         </div>
       </div>
+      <h3 className="text-[20px]">Invitations</h3>
+      <div className="my-[16px] border border-fifth rounded-[8px] p-[20px] flex flex-col gap-[16px]">
+        {!invitations?.length && (
+          <p className="text-[13px] text-customColor18">No invitations yet.</p>
+        )}
+        {(invitations || []).map((invite) => {
+          const status = invite.acceptedAt
+            ? 'Accepted'
+            : invite.revokedAt
+            ? 'Revoked'
+            : new Date(invite.expiresAt) <= new Date()
+            ? 'Expired'
+            : 'Pending';
+          return (
+            <div
+              key={invite.id}
+              className="flex flex-wrap gap-[8px] items-center text-[13px]"
+            >
+              <span className="flex-1 min-w-[160px] break-all">
+                {invite.email} · {invite.role === 'ADMIN' ? 'Admin' : 'User'}
+                <br />
+                <span className="text-customColor18">
+                  {status} · expires{' '}
+                  {new Date(invite.expiresAt).toLocaleString()}
+                </span>
+              </span>
+              {status === 'Pending' &&
+                (user?.isSuperAdmin || invite.role === 'USER') && (
+                  <div className="flex flex-wrap gap-[8px]">
+                    {(['copy', 'resend', 'revoke'] as const).map((kind) => (
+                      <Button
+                        secondary
+                        disabled={busy}
+                        key={kind}
+                        onClick={async () => {
+                          if (
+                            kind === 'copy' ||
+                            (await deleteDialog(
+                              kind === 'resend'
+                                ? `Send this invitation again to ${invite.email}?`
+                                : `Revoke the invitation for ${invite.email}?`
+                            ))
+                          )
+                            await action(
+                              `/settings/team/invitations/${invite.id}/${kind}`,
+                              'POST'
+                            );
+                        }}
+                      >
+                        {kind === 'copy'
+                          ? 'Copy link'
+                          : kind === 'resend'
+                          ? 'Resend'
+                          : 'Revoke'}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+            </div>
+          );
+        })}
+      </div>
+      {error && (
+        <p role="alert" className="text-red-400">
+          {error}
+        </p>
+      )}
+      <details className="border border-fifth rounded-[8px] p-[16px]">
+        <summary className="cursor-pointer">Recent team activity</summary>
+        <div className="mt-[12px] flex flex-col gap-[8px] text-[12px]">
+          {!audit?.length && <p>No team changes recorded yet.</p>}
+          {(audit || []).map((entry) => (
+            <p key={entry.id}>
+              {new Date(entry.createdAt).toLocaleString()} ·{' '}
+              {entry.action.toLowerCase().replace(/_/g, ' ')}
+              {entry.target ? ` · ${entry.target}` : ''}
+            </p>
+          ))}
+        </div>
+      </details>
     </div>
   );
 };

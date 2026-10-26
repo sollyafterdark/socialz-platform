@@ -3,14 +3,13 @@ import {
   IsDefined,
   IsEmail,
   IsIn,
+  IsOptional,
   IsString,
-  ValidateIf,
 } from 'class-validator';
 
 export class AddTeamMemberDto {
   @IsDefined()
   @IsEmail()
-  @ValidateIf((o) => o.sendEmail)
   email: string;
 
   @IsString()
@@ -20,4 +19,8 @@ export class AddTeamMemberDto {
   @IsDefined()
   @IsBoolean()
   sendEmail: boolean;
+  // Confirm the workspace shown in the dialog; never use this to select one.
+  @IsOptional()
+  @IsString()
+  expectedWorkspaceId?: string;
 }

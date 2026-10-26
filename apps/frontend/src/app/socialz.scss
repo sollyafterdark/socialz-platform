@@ -1,0 +1,273 @@
+/* Socialz Blue Hour. Map upstream tokens; provider previews retain their own colours. */
+:root body.light,
+:root body.dark {
+  --sz-indigo: #4454b3;
+  --sz-mist: #dbe5ff;
+  --sz-midnight: #1c2645;
+  --sz-apricot: #f7b285;
+  --new-ai-btn: #7a4b13;
+  --color-custom4: var(--new-btn-primary);
+  --color-custom7: var(--new-btn-primary);
+  --color-custom28: var(--new-btn-primary);
+  --color-custom41: var(--new-boxFocused);
+  --color-custom45: var(--new-btn-primary);
+  --color-custom50: var(--new-btn-primary);
+  --color-custom51: var(--new-btn-primary);
+  --new-table-text-focused: var(--new-btn-primary);
+  --color-forth: var(--new-btn-primary);
+  --color-seventh: var(--new-btn-primary);
+  --color-gray: var(--new-table-text);
+  --color-input-text: var(--new-table-text);
+  --color-custom53: var(--new-table-text);
+  --color-primary: var(--new-bgColor);
+  --color-secondary: var(--new-bgColorInner);
+  --color-third: var(--new-bgColorInner);
+  --color-text: var(--new-btn-text);
+  --color-table-border: var(--new-table-border);
+  --color-custom2: var(--new-bgColorInner);
+  --color-custom3: var(--new-bgColorInner);
+  --color-custom20: var(--new-bgColorInner);
+  --color-custom23: var(--new-bgColorInner);
+  --color-custom30: var(--new-boxFocused);
+  --color-custom48: var(--new-bgColorInner);
+  --color-custom52: var(--new-bgColorInner);
+  --new-textItemFocused: var(--new-btn-text);
+  --new-textItemBlur: var(--new-table-text);
+  --new-menu-dots: var(--new-table-text);
+  --new-menu-hover: var(--new-btn-text);
+}
+
+:root body.light {
+  color-scheme: light;
+  --new-bgColor: #fafbff;
+  --new-bgColorInner: #fff;
+  --new-bgLineColor: #d0d8eb;
+  --new-settings: #f0f3fc;
+  --new-border: #d0d8eb;
+  --new-sep: #d0d8eb;
+  --new-boxFocused: #dbe5ff;
+  --new-box-hover: #eef2ff;
+  --new-btn-simple: #eef2ff;
+  --new-btn-text: #1c2645;
+  --new-textColor: 28 38 69;
+  --new-btn-primary: #4454b3;
+  --sz-on-primary: #fff;
+  --sz-control-border: #7b87a4;
+  --new-blockSeparator: #d0d8eb;
+  --new-table-border: #d0d8eb;
+  --new-table-header: #f0f3fc;
+  --new-table-text: #59637b;
+  --new-col-color: #f0f3fc;
+  --new-big-strips: #f0f3fc;
+  --new-small-strips: #eef2ff;
+  --menu-shadow: 0 8px 32px rgb(28 38 69 / 12%);
+}
+
+:root body.dark {
+  color-scheme: dark;
+  --new-bgColor: #1c2645;
+  --new-bgColorInner: #263254;
+  --new-bgLineColor: #506080;
+  --new-settings: #333f69;
+  --new-border: #506080;
+  --new-sep: #506080;
+  --new-boxFocused: #333f69;
+  --new-box-hover: #333f69;
+  --new-btn-simple: #333f69;
+  --new-btn-text: #fafbff;
+  --new-textColor: 250 251 255;
+  --new-btn-primary: #a8b6ff;
+  --sz-on-primary: #1c2645;
+  --sz-control-border: #8c9bc0;
+  --new-ai-btn: #f7b285;
+  --new-blockSeparator: #506080;
+  --new-table-border: #506080;
+  --new-table-header: #263254;
+  --new-table-text: #bbc7e5;
+  --new-col-color: #263254;
+  --new-big-strips: #263254;
+  --new-small-strips: #333f69;
+}
+
+.socialz-app {
+  font-variant-numeric: tabular-nums;
+  h1,
+  h2,
+  h3 {
+    font-family: var(--socialz-heading-font), Inter, system-ui, sans-serif;
+  }
+  &:lang(ru) h1,
+  &:lang(ru) h2,
+  &:lang(ru) h3 {
+    font-family: inherit;
+  }
+  :is(button, input, textarea, select, a):focus-visible {
+    outline: 3px solid var(--new-btn-primary) !important;
+    outline-offset: 3px;
+  }
+  :is(.bg-forth, .bg-btnPrimary, .bg-customColor50, .bg-customColor51) {
+    color: var(--sz-on-primary) !important;
+    border-radius: 12px;
+  }
+}
+.socialz-symbol {
+  display: block;
+  width: 48px;
+  height: 48px;
+  margin: 14px auto 0;
+}
+.socialz-wordmark {
+  display: block;
+  width: 210px;
+  max-width: 100%;
+}
+.socialz-wordmark img {
+  width: 100%;
+  height: auto;
+}
+.socialz-logo-dark {
+  display: none;
+}
+.dark .socialz-logo-light {
+  display: none;
+}
+.dark .socialz-logo-dark {
+  display: block;
+}
+.socialz-auth {
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: minmax(320px, 550px) 1fr;
+  padding: 20px;
+  gap: 20px;
+  background: var(--new-bgColor);
+  color: var(--new-btn-text);
+}
+.socialz-auth-form {
+  display: flex;
+  padding: 64px 40px;
+  background: var(--new-bgColorInner);
+  border: 1px solid var(--new-table-border);
+  border-radius: 24px;
+}
+.socialz-auth-content {
+  width: 100%;
+  max-width: 420px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 44px;
+  /* Upstream auth forms use white labels because their original panel is always dark. */
+  .text-white {
+    color: var(--new-btn-text);
+  }
+  input {
+    background: var(--new-bgColorInner);
+    border-color: var(--sz-control-border);
+    color: var(--new-btn-text);
+  }
+  :is(button.bg-forth, button.bg-btnPrimary) {
+    color: var(--sz-on-primary) !important;
+  }
+}
+.socialz-auth-story {
+  align-self: center;
+  text-align: center;
+  max-width: 720px;
+  margin: auto;
+  padding: 48px 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  h1 {
+    font-size: clamp(32px, 3.2vw, 48px);
+    line-height: 1.2;
+    letter-spacing: -0.035em;
+  }
+  > p:not(.socialz-eyebrow) {
+    max-width: 440px;
+    color: var(--new-table-text);
+    font-size: 18px;
+    line-height: 1.7;
+  }
+}
+.socialz-eyebrow {
+  color: var(--new-btn-primary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+}
+.socialz-orbit {
+  width: 220px;
+  height: 220px;
+  border: 1px solid #b9c8f4;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #dbe5ff;
+  margin-bottom: 12px;
+  position: relative;
+  &::after {
+    content: '';
+    position: absolute;
+    width: 30px;
+    height: 30px;
+    right: 5px;
+    top: 28px;
+    background: #f7b285;
+    border: 5px solid var(--new-bgColor);
+    border-radius: 50%;
+  }
+}
+.socialz-auth-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  font-size: 12px;
+  span {
+    padding: 10px 14px;
+    border: 1px solid var(--new-table-border);
+    border-radius: 24px;
+  }
+}
+.socialz-source {
+  position: fixed;
+  bottom: 6px;
+  right: 16px;
+  z-index: 450;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--new-bgColorInner);
+  color: var(--new-table-text);
+  text-decoration: underline;
+}
+@media (max-width: 960px) {
+  .socialz-auth {
+    display: flex;
+    padding: 12px;
+  }
+  .socialz-auth-form {
+    flex: 1;
+    padding: 40px 24px;
+    border-radius: 20px;
+  }
+  .socialz-auth-content {
+    gap: 32px;
+  }
+  .socialz-auth-story {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .socialz-app *,
+  .socialz-app *::before,
+  .socialz-app *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

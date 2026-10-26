@@ -38,7 +38,11 @@ type Inputs = {
   providerToken: string;
   provider: string;
 };
-export function Register() {
+export function Register({
+  invitation,
+}: {
+  invitation?: { email: string } | null;
+}) {
   const getQuery = useSearchParams();
   const fetch = useFetch();
   const [provider] = useState(getQuery?.get('provider')?.toUpperCase());
@@ -66,19 +70,23 @@ export function Register() {
     }
   }, [provider, code]);
   if (!code && !provider) {
-    return <RegisterAfter token="" provider="LOCAL" />;
+    return <RegisterAfter token="" provider="LOCAL" invitation={invitation} />;
   }
   if (!show) {
     return <LoadingComponent />;
   }
   return (
-    <RegisterAfter token={code} provider={provider?.toUpperCase() || 'LOCAL'} />
+    <RegisterAfter
+      token={code}
+      provider={provider?.toUpperCase() || 'LOCAL'}
+      invitation={invitation}
+    />
   );
 }
 function getHelpfulReasonForRegistrationFailure(httpCode: number) {
   switch (httpCode) {
     case 400:
-      return 'Email already exists';
+      return 'Could not create your account. Check your invitation and email address.';
     case 404:
       return 'Your browser got a 404 when trying to contact the API, the most likely reasons for this are the NEXT_PUBLIC_BACKEND_URL is set incorrectly, or the backend is not running.';
   }
@@ -87,9 +95,11 @@ function getHelpfulReasonForRegistrationFailure(httpCode: number) {
 export function RegisterAfter({
   token,
   provider,
+  invitation,
 }: {
   token: string;
   provider: string;
+  invitation?: { email: string } | null;
 }) {
   const t = useT();
   const {
@@ -115,6 +125,9 @@ export function RegisterAfter({
     defaultValues: {
       providerToken: token,
       provider: provider,
+      ...(invitation
+        ? { email: invitation.email, company: 'Invited team member' }
+        : {}),
     },
   });
   const fetchData = useFetch();
@@ -212,14 +225,23 @@ export function RegisterAfter({
                     />
                   </>
                 )}
-                <Input
-                  label="Company"
-                  translationKey="label_company"
-                  {...form.register('company')}
-                  autoComplete="off"
-                  type="text"
-                  placeholder={t('label_company', 'Company')}
-                />
+                {!invitation && (
+                  <Input
+                    label="Company"
+                    translationKey="label_company"
+                    {...form.register('company')}
+                    autoComplete="off"
+                    type="text"
+                    placeholder={t('label_company', 'Company')}
+                  />
+                )}
+                {invitation && (
+                  <p className="text-[13px]">
+                    Create your account with {invitation.email} to join the team
+                    you were invited to. Verify your email to activate your
+                    account.
+                  </p>
+                )}
               </div>
               <div className={clsx('text-[12px]')}>
                 {t(

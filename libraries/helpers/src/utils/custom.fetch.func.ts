@@ -1,3 +1,5 @@
+import { sessionCookieNames } from '@gitroom/helpers/auth/session.cookies';
+
 export interface Params {
   baseUrl: string;
   beforeRequest?: (url: string, options: RequestInit) => Promise<RequestInit>;
@@ -19,29 +21,18 @@ export const customFetch = (
         ? undefined
         : new URL(window.location.href).searchParams.get('loggedAuth');
     const newRequestObject = await params?.beforeRequest?.(url, options);
-    const authNonSecuredCookie =
-      typeof document === 'undefined'
-        ? null
-        : document.cookie
-            .split(';')
-            .find((p) => p.includes('auth='))
-            ?.split('=')[1];
-
-    const authNonSecuredOrg =
-      typeof document === 'undefined'
-        ? null
-        : document.cookie
-            .split(';')
-            .find((p) => p.includes('showorg='))
-            ?.split('=')[1];
-
-    const authNonSecuredImpersonate =
-      typeof document === 'undefined'
-        ? null
-        : document.cookie
-            .split(';')
-            .find((p) => p.includes('impersonate='))
-            ?.split('=')[1];
+    // HTTPS sessions use HttpOnly cookies sent by the browser. Never let a
+    // readable cookie from another app override that session in an Auth header.
+    const readSessionCookie = (name: string) => {
+      if (secured || typeof document === 'undefined') return undefined;
+      const prefix = name + '=';
+      const entry = document.cookie.split(';').map((part) => part.trim())
+        .find((part) => part.startsWith(prefix));
+      return entry?.slice(prefix.length);
+    };
+    const authNonSecuredCookie = readSessionCookie(sessionCookieNames.auth);
+    const authNonSecuredOrg = readSessionCookie(sessionCookieNames.showorg);
+    const authNonSecuredImpersonate = readSessionCookie(sessionCookieNames.impersonate);
 
     const fetchRequest = await fetch(params.baseUrl + url, {
       ...(secured ? { credentials: 'include' } : {}),

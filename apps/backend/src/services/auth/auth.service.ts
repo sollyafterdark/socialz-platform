@@ -9,6 +9,13 @@ import { AuthProviderManager } from '@gitroom/backend/services/auth/providers/pr
 import dayjs from 'dayjs';
 import { ForgotReturnPasswordDto } from '@gitroom/nestjs-libraries/dtos/auth/forgot-return.password.dto';
 import { EmailService } from '@gitroom/nestjs-libraries/services/email.service';
+type InviteDetails = {
+  orgId: string;
+  role: 'USER' | 'ADMIN';
+  id: string;
+  email: string;
+};
+
 import { NewsletterService } from '@gitroom/nestjs-libraries/newsletter/newsletter.service';
 
 @Injectable()
@@ -19,14 +26,20 @@ export class AuthService {
     private _emailService: EmailService,
     private _providerManager: AuthProviderManager
   ) {}
-  async canRegister(provider: string) {
-    if (
-      process.env.DISABLE_REGISTRATION !== 'true' ||
-      provider === Provider.GENERIC
-    ) {
-      return true;
+  async canRegister(
+    provider: string,
+    invitation?: boolean | InviteDetails,
+    email?: string
+  ) {
+    if (invitation && typeof invitation !== 'boolean') {
+      try {
+        await this._organizationService.validInvitation(invitation, email);
+        return true;
+      } catch {
+        return false;
+      }
     }
-
+    if (process.env.DISABLE_REGISTRATION !== 'true') return true;
     return (await this._organizationService.getCount()) === 0;
   }
 
@@ -35,7 +48,7 @@ export class AuthService {
     body: CreateOrgUserDto | LoginUserDto,
     ip: string,
     userAgent: string,
-    addToOrg?: boolean | { orgId: string; role: 'USER' | 'ADMIN'; id: string }
+    addToOrg?: boolean | InviteDetails
   ) {
     if (provider === Provider.LOCAL) {
       if (process.env.DISALLOW_PLUS && body.email.includes('+')) {
@@ -50,27 +63,27 @@ export class AuthService {
           throw new Error('Email already exists');
         }
 
-        if (!(await this.canRegister(provider))) {
+        if (!(await this.canRegister(provider, addToOrg, body.email))) {
           throw new Error('Registration is disabled');
         }
 
-        const create = await this._organizationService.createOrgAndUser(
-          body,
-          ip,
-          userAgent
-        );
+        const invited = addToOrg && typeof addToOrg !== 'boolean';
+        const create = invited
+          ? await this._organizationService.createInvitedUser(
+              body,
+              ip,
+              userAgent,
+              addToOrg as InviteDetails
+            )
+          : await this._organizationService.createOrgAndUser(
+              body,
+              ip,
+              userAgent
+            );
+        const account = 'user' in create ? create.user : create.users[0].user;
+        const addedOrg = 'membership' in create ? create.membership : false;
 
-        const addedOrg =
-          addToOrg && typeof addToOrg !== 'boolean'
-            ? await this._organizationService.addUserToOrg(
-                create.users[0].user.id,
-                addToOrg.id,
-                addToOrg.orgId,
-                addToOrg.role
-              )
-            : false;
-
-        const obj = { addedOrg, jwt: await this.jwt(create.users[0].user) };
+        const obj = { addedOrg, jwt: await this.jwt(account) };
         await this._emailService.sendEmailSync(
           body.email,
           'Activate your account',
@@ -87,25 +100,22 @@ export class AuthService {
         throw new Error('User is not activated');
       }
 
-      return { addedOrg: false, jwt: await this.jwt(user) };
+      const addedOrg =
+        addToOrg && typeof addToOrg !== 'boolean'
+          ? await this._organizationService
+              .acceptInvitation(user.id, addToOrg)
+              .catch(() => false)
+          : false;
+      return { addedOrg, jwt: await this.jwt(user) };
     }
 
-    const user = await this.loginOrRegisterProvider(
+    const { user, addedOrg } = await this.loginOrRegisterProvider(
       provider,
       body as CreateOrgUserDto,
       ip,
-      userAgent
+      userAgent,
+      addToOrg
     );
-
-    const addedOrg =
-      addToOrg && typeof addToOrg !== 'boolean'
-        ? await this._organizationService.addUserToOrg(
-            user.id,
-            addToOrg.id,
-            addToOrg.orgId,
-            addToOrg.role
-          )
-        : false;
     return { addedOrg, jwt: await this.jwt(user) };
   }
 
@@ -117,10 +127,14 @@ export class AuthService {
     try {
       const getOrg: any = AuthChecker.verifyJWT(cookie);
       if (
+        getOrg.purpose !== 'team-invitation' ||
+        typeof getOrg.email !== 'string' ||
+        !getOrg.email.includes('@') ||
         typeof getOrg.orgId !== 'string' ||
         typeof getOrg.id !== 'string' ||
         !['USER', 'ADMIN'].includes(getOrg.role) ||
         !getOrg.timeLimit ||
+        !dayjs(getOrg.timeLimit).isValid() ||
         dayjs(getOrg.timeLimit).isBefore(dayjs())
       ) {
         return false;
@@ -141,7 +155,8 @@ export class AuthService {
     provider: Provider,
     body: CreateOrgUserDto,
     ip: string,
-    userAgent: string
+    userAgent: string,
+    invitation?: boolean | InviteDetails
   ) {
     const providerInstance = this._providerManager.getProvider(provider);
     const providerUser = await providerInstance.getUser(body.providerToken);
@@ -155,25 +170,42 @@ export class AuthService {
       provider
     );
     if (user) {
-      return user;
+      const addedOrg =
+        invitation && typeof invitation !== 'boolean'
+          ? await this._organizationService
+              .acceptInvitation(user.id, invitation)
+              .catch(() => false)
+          : false;
+      return { user, addedOrg };
     }
 
-    if (!(await this.canRegister(provider))) {
+    if (!(await this.canRegister(provider, invitation, providerUser.email))) {
       throw new Error('Registration is disabled');
     }
 
-    const create = await this._organizationService.createOrgAndUser(
-      {
-        company: body.company,
-        email: providerUser.email,
-        password: '',
-        provider,
-        providerId: providerUser.id,
-        datafast_visitor_id: body.datafast_visitor_id,
-      },
-      ip,
-      userAgent
-    );
+    const accountBody = {
+      company: body.company,
+      email: providerUser.email,
+      password: '',
+      provider,
+      providerId: providerUser.id,
+      datafast_visitor_id: body.datafast_visitor_id,
+    };
+    const create =
+      invitation && typeof invitation !== 'boolean'
+        ? await this._organizationService.createInvitedUser(
+            accountBody,
+            ip,
+            userAgent,
+            invitation
+          )
+        : await this._organizationService.createOrgAndUser(
+            accountBody,
+            ip,
+            userAgent
+          );
+    const account = 'user' in create ? create.user : create.users[0].user;
+    const addedOrg = 'membership' in create ? create.membership : false;
 
     this._track('register', providerUser.email, body.datafast_visitor_id).catch(
       (err) => {}
@@ -183,13 +215,20 @@ export class AuthService {
 
     try {
       if (providerInstance?.postRegistration) {
-        await providerInstance.postRegistration(body.providerToken, create.id);
+        await providerInstance.postRegistration(
+          body.providerToken,
+          typeof addedOrg !== 'boolean' && addedOrg
+            ? addedOrg.organizationId
+            : 'id' in create
+            ? create.id
+            : ''
+        );
       }
     } catch (err) {
       // Don't fail registration if postRegistration fails
     }
 
-    return create.users[0].user;
+    return { user: account, addedOrg };
   }
 
   private async _track(
@@ -235,16 +274,26 @@ export class AuthService {
     );
   }
 
-  forgotReturn(body: ForgotReturnPasswordDto) {
-    const user = AuthChecker.verifyJWT(body.token) as {
-      id: string;
-      expires: string;
-    };
-    if (typeof user.id !== 'string' || dayjs(user.expires).isBefore(dayjs())) {
+  async forgotReturn(body: ForgotReturnPasswordDto) {
+    try {
+      const user = AuthChecker.verifyJWT(body.token);
+      if (
+        !user ||
+        typeof user !== 'object' ||
+        typeof user.id !== 'string' ||
+        !user.id ||
+        typeof user.expires !== 'string' ||
+        !dayjs(user.expires).isValid() ||
+        !dayjs(user.expires).isAfter(dayjs())
+      ) {
+        return false;
+      }
+      return !!(await this._userService.updatePassword(user.id, body.password));
+    } catch {
+      // Invalid signatures, expired links and removed accounts are expected
+      // recovery failures, not unhandled errors or successful password resets.
       return false;
     }
-
-    return this._userService.updatePassword(user.id, body.password);
   }
 
   async activate(code: string, tracking: string) {

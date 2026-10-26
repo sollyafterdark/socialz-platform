@@ -1,35 +1,24 @@
 import { internalFetch } from '@gitroom/helpers/utils/internal.fetch';
-export const dynamic = 'force-dynamic';
+import { redirect } from 'next/navigation';
 import { Register } from '@gitroom/frontend/components/auth/register';
 import { Metadata } from 'next';
-import { isGeneralServerSide } from '@gitroom/helpers/utils/is.general.server.side';
-import Link from 'next/link';
-import { getT } from '@gitroom/react/translation/get.translation.service.backend';
-import { LoginWithOidc } from '@gitroom/frontend/components/auth/login.with.oidc';
+
+export const dynamic = 'force-dynamic';
 export const metadata: Metadata = {
-  title: `${isGeneralServerSide() ? 'Postiz' : 'Gitroom'} Register`,
+  title: 'Socialz Register',
   description: '',
 };
-export default async function Auth(params: {searchParams: Promise<{provider: string}>}) {
-  const t = await getT();
-  if (process.env.DISABLE_REGISTRATION === 'true') {
-    const canRegister = (
-      await (await internalFetch('/auth/can-register')).json()
-    ).register;
-    if (!canRegister && !(await params?.searchParams)?.provider) {
-      return (
-        <>
-          <LoginWithOidc />
-          <div className="text-center">
-            {t('registration_is_disabled', 'Registration is disabled')}
-            <br />
-            <Link className="underline hover:font-bold" href="/auth/login">
-              {t('login_instead', 'Login instead')}
-            </Link>
-          </div>
-        </>
-      );
-    }
+
+export default async function Auth(params: {
+  searchParams: Promise<{ provider: string }>;
+}) {
+  const availability = await (await internalFetch('/auth/can-register')).json();
+  if (
+    process.env.DISABLE_REGISTRATION === 'true' &&
+    !availability.register &&
+    !(await params.searchParams)?.provider
+  ) {
+    redirect('/auth/login');
   }
-  return <Register />;
+  return <Register invitation={availability.invitation} />;
 }

@@ -16,6 +16,7 @@ export function Forgot() {
   const t = useT();
   const [loading, setLoading] = useState(false);
   const [state, setState] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const resolver = useMemo(() => {
     return classValidatorResolver(ForgotPasswordDto);
   }, []);
@@ -25,15 +26,26 @@ export function Forgot() {
   const fetchData = useFetch();
   const onSubmit: SubmitHandler<Inputs> = async (data) => {
     setLoading(true);
-    await fetchData('/auth/forgot', {
-      method: 'POST',
-      body: JSON.stringify({
-        ...data,
-        provider: 'LOCAL',
-      }),
-    });
-    setState(true);
-    setLoading(false);
+    setError(null);
+    try {
+      const response = await fetchData('/auth/forgot', {
+        method: 'POST',
+        body: JSON.stringify({ email: data.email.trim(), provider: 'LOCAL' }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.forgot !== true)
+        throw new Error('Reset email failed');
+      setState(true);
+    } catch {
+      setError(
+        t(
+          'password_reset_email_failed',
+          'We could not send the reset email. Please try again.'
+        )
+      );
+    } finally {
+      setLoading(false);
+    }
   };
   return (
     <div className="flex flex-1 flex-col">
@@ -52,12 +64,23 @@ export function Forgot() {
                   translationKey="label_email"
                   {...form.register('email')}
                   type="email"
+                  autoComplete="email"
+                  aria-label={t('label_email', 'Email')}
                   placeholder={t('email_address', 'Email Address')}
                 />
               </div>
+              {error && (
+                <p role="alert" className="text-red-400 text-sm">
+                  {error}
+                </p>
+              )}
               <div className="text-center mt-6">
                 <div className="w-full flex">
-                  <Button type="submit" className="flex-1 !h-[52px] !rounded-[10px]" loading={loading}>
+                  <Button
+                    type="submit"
+                    className="flex-1 !h-[52px] !rounded-[10px]"
+                    loading={loading}
+                  >
                     {t(
                       'send_password_reset_email',
                       'Send Password Reset Email'
@@ -73,10 +96,10 @@ export function Forgot() {
             </>
           ) : (
             <>
-              <div className="text-start mt-6">
+              <div role="status" className="text-start mt-6">
                 {t(
-                  'we_have_send_you_an_email_with_a_link_to_reset_your_password',
-                  'We have send you an email with a link to reset your password.'
+                  'password_reset_email_confirmation',
+                  'If this email belongs to an email-and-password account, you will receive a reset link. Check your inbox and spam folder.'
                 )}
               </div>
               <p className="mt-4 text-sm">

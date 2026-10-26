@@ -1,4 +1,6 @@
 export const dynamic = 'force-dynamic';
+import type { Metadata } from 'next';
+import { socialzIcons } from '@gitroom/frontend/components/layout/socialz.icons';
 import '../global.scss';
 import 'react-tooltip/dist/react-tooltip.css';
 import '@copilotkit/react-ui/styles.css';
@@ -9,12 +11,11 @@ import clsx from 'clsx';
 import { VariableContextComponent } from '@gitroom/react/helpers/variable.context';
 import UtmSaver from '@gitroom/helpers/utils/utm.saver';
 
+export const metadata: Metadata = { icons: socialzIcons };
+
 export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <html>
-      <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
-      </head>
       <body
         className={clsx(jakartaSans.className, 'dark text-primary !bg-primary')}
       >

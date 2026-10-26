@@ -17,6 +17,7 @@ export function ForgotReturn({ token }: { token: string }) {
   const [loading, setLoading] = useState(false);
   const t = useT();
   const [state, setState] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const resolver = useMemo(() => {
     return classValidatorResolver(ForgotReturnPasswordDto);
   }, []);
@@ -30,30 +31,41 @@ export function ForgotReturn({ token }: { token: string }) {
   const fetchData = useFetch();
   const onSubmit: SubmitHandler<Inputs> = async (data) => {
     setLoading(true);
-    const { reset } = await (
-      await fetchData('/auth/forgot-return', {
+    setError(null);
+    try {
+      const response = await fetchData('/auth/forgot-return', {
         method: 'POST',
-        body: JSON.stringify({
-          ...data,
-        }),
-      })
-    ).json();
-    setState(true);
-    if (!reset) {
-      form.setError('password', {
-        type: 'manual',
-        message: t('password_reset_link_expired', 'Your password reset link has expired. Please try again.'),
+        body: JSON.stringify(data),
       });
-      return false;
+      const result = await response.json();
+      if (!response.ok || result.reset !== true) {
+        setError(
+          t(
+            'password_reset_link_expired',
+            'Your password reset link has expired. Please try again.'
+          )
+        );
+        return;
+      }
+      setState(true);
+      form.reset();
+    } catch {
+      setError(
+        t(
+          'password_reset_failed',
+          'We could not reset your password. Please try again.'
+        )
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
   return (
     <FormProvider {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)}>
         <div>
           <h1 className="text-3xl font-bold text-start mb-4 cursor-pointer">
-            {t('forgot_password_1', 'Forgot Password')}
+            {t('change_password', 'Change Password')}
           </h1>
         </div>
         {!state ? (
@@ -64,6 +76,8 @@ export function ForgotReturn({ token }: { token: string }) {
                 translationKey="label_new_password"
                 {...form.register('password')}
                 type="password"
+                autoComplete="new-password"
+                aria-label={t('label_new_password', 'New Password')}
                 placeholder={t('label_password', 'Password')}
               />
               <Input
@@ -71,9 +85,23 @@ export function ForgotReturn({ token }: { token: string }) {
                 translationKey="label_repeat_password"
                 {...form.register('repeatPassword')}
                 type="password"
+                autoComplete="new-password"
+                aria-label={t('label_repeat_password', 'Repeat Password')}
                 placeholder={t('label_repeat_password', 'Repeat Password')}
               />
             </div>
+            {error && (
+              <div role="alert" className="text-red-400 text-sm mt-2">
+                <p>{error}</p>
+                <Link
+                  href="/auth/forgot"
+                  prefetch={false}
+                  className="underline"
+                >
+                  {t('request_new_reset_link', 'Request a new reset link')}
+                </Link>
+              </div>
+            )}
             <div className="text-center mt-6">
               <div className="w-full flex">
                 <Button type="submit" className="flex-1" loading={loading}>
@@ -89,14 +117,18 @@ export function ForgotReturn({ token }: { token: string }) {
           </>
         ) : (
           <>
-            <div className="text-start mt-6">
+            <div role="status" className="text-start mt-6">
               {t(
-                'we_successfully_reset_your_password_you_can_now_login_with_your',
-                'We successfully reset your password. You can now login with your'
+                'password_reset_complete',
+                'Your password has been reset. You can now sign in with your new password.'
               )}
             </div>
             <p className="mt-4 text-sm">
-              <Link href="/auth/login" className="underline cursor-pointer">
+              <Link
+                href="/auth/logout"
+                prefetch={false}
+                className="underline cursor-pointer"
+              >
                 {t('go_back_to_login', 'Go back to login')}
               </Link>
             </p>

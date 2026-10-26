@@ -2,6 +2,10 @@ import { SentryComponent } from '@gitroom/frontend/components/layout/sentry.comp
 
 export const dynamic = 'force-dynamic';
 import '../global.scss';
+import '../socialz.scss';
+import { sora } from '@gitroom/frontend/fonts/socialz/socialz.font';
+import type { Metadata } from 'next';
+import { socialzIcons } from '@gitroom/frontend/components/layout/socialz.icons';
 import 'react-tooltip/dist/react-tooltip.css';
 import '@copilotkit/react-ui/styles.css';
 import LayoutContext from '@gitroom/frontend/components/layout/layout.context';
@@ -24,16 +28,31 @@ import { HtmlComponent } from '@gitroom/frontend/components/layout/html.componen
 import Script from 'next/script';
 import { ChangeDirClient } from '@gitroom/frontend/components/new-layout/change.dir.client';
 
+export const metadata: Metadata = {
+  metadataBase: new URL('https://socialz.mpsolara.com'),
+  title: 'Socialz',
+  description:
+    'Your content, in rhythm. Plan, collaborate and publish with Socialz.',
+  applicationName: 'Socialz',
+  manifest: '/site.webmanifest',
+  icons: socialzIcons,
+  openGraph: {
+    title: 'Socialz',
+    description: 'Your content, in rhythm.',
+    images: ['/brand/social/socialz-social-card.png'],
+  },
+};
+
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
   const language = cookieStore.get(cookieName)?.value || fallbackLng;
+  const theme = cookieStore.get('mode')?.value === 'dark' ? 'dark' : 'light';
   const Plausible = !!process.env.STRIPE_PUBLISHABLE_KEY
     ? PlausibleProvider
     : Fragment;
   return (
-    <html>
+    <html lang={language}>
       <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
         {!!process.env.DATAFAST_WEBSITE_ID && (
           <Script
             data-website-id={process.env.DATAFAST_WEBSITE_ID}
@@ -45,7 +64,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       </head>
       <ChangeDirClient />
       <body
-        className={clsx(jakartaSans.className, 'dark text-primary !bg-primary')}
+        className={clsx(
+          jakartaSans.className,
+          sora.variable,
+          theme,
+          'socialz-app text-primary !bg-primary'
+        )}
       >
         <VariableContextComponent
           storageProvider={
@@ -106,6 +130,17 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               <LayoutContext>
                 <UtmSaver />
                 {children}
+                <a
+                  className="socialz-source"
+                  href={
+                    process.env.SOCIALZ_SOURCE_URL ||
+                    'https://github.com/sollyafterdark/socialz-platform/tree/brand/blue-hour'
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Source code
+                </a>
               </LayoutContext>
             </Plausible>
           </SentryComponent>

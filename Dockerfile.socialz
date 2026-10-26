@@ -1,0 +1,14 @@
+# Dependency base verified against this fork's unchanged lockfile and Prisma schema.
+# All application services are rebuilt from the Socialz source below.
+FROM ghcr.io/gitroomhq/postiz-app@sha256:1e376ff2cb781022d528f171719cf174cf693a985a30cb40eefb13eae3ddda13
+ARG SOCIALZ_REVISION=development
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NODE_OPTIONS=--max-old-space-size=4096 \
+    NEXT_PUBLIC_VERSION=socialz-blue-hour
+LABEL org.opencontainers.image.source="https://github.com/sollyafterdark/socialz-platform" \
+      org.opencontainers.image.revision=$SOCIALZ_REVISION
+WORKDIR /app
+RUN node -e "const f=require('fs'),c=require('crypto');if(c.createHash('sha256').update(f.readFileSync('pnpm-lock.yaml')).digest('hex')!=='3b7379324de2332e3e6814d536cda0fb3a57cb7aa82e3ab6773b1a5f7ab239ff')process.exit(1)"
+COPY . /app
+RUN pnpm run prisma-generate && pnpm run build
+CMD ["sh", "-c", "nginx && pnpm run pm2"]

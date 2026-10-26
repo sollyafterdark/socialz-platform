@@ -1,5 +1,7 @@
 'use client';
 
+import { sessionCookieNames } from '@gitroom/helpers/auth/session.cookies';
+
 import { ReactNode, useCallback } from 'react';
 import { FetchWrapperComponent } from '@gitroom/helpers/utils/custom.fetch';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
@@ -43,18 +45,18 @@ function LayoutContextInner(params: { children: ReactNode }) {
       const logout =
         response?.headers?.get('logout') || response?.headers?.get('Logout');
       if (headerAuth) {
-        setCookie('auth', headerAuth, 365);
+        setCookie(sessionCookieNames.auth, headerAuth, 365);
       }
       if (showOrg) {
-        setCookie('showorg', showOrg, 365);
+        setCookie(sessionCookieNames.showorg, showOrg, 365);
       }
       if (impersonate) {
-        setCookie('impersonate', impersonate, 365);
+        setCookie(sessionCookieNames.impersonate, impersonate, 365);
       }
       if (logout && !isSecured) {
-        setCookie('auth', '', -10);
-        setCookie('showorg', '', -10);
-        setCookie('impersonate', '', -10);
+        setCookie(sessionCookieNames.auth, '', -10);
+        setCookie(sessionCookieNames.showorg, '', -10);
+        setCookie(sessionCookieNames.impersonate, '', -10);
         window.location.href = '/';
         return true;
       }
@@ -82,11 +84,14 @@ function LayoutContextInner(params: { children: ReactNode }) {
 
       if (response.status === 401 || response?.headers?.get('logout')) {
         if (!isSecured) {
-          setCookie('auth', '', -10);
-          setCookie('showorg', '', -10);
-          setCookie('impersonate', '', -10);
+          setCookie(sessionCookieNames.auth, '', -10);
+          setCookie(sessionCookieNames.showorg, '', -10);
+          setCookie(sessionCookieNames.impersonate, '', -10);
         }
-        window.location.href = '/';
+        // HttpOnly cookies must be expired by the server before returning to
+        // sign-in; redirecting to / with a stale token repeats the dashboard.
+        window.location.href = '/auth/logout';
+        return true;
       }
       if (response.status === 406) {
         if (

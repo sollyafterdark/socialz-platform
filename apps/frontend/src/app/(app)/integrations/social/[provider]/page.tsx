@@ -1,3 +1,4 @@
+import { sessionCookieNames } from '@gitroom/helpers/auth/session.cookies';
 import { ContinueIntegration } from '@gitroom/frontend/components/launches/continue.integration';
 import { cookies } from 'next/headers';
 
@@ -18,6 +19,6 @@ export default async function Page(
     provider
   } = params;
 
-  const get = (await cookies()).get('auth');
+  const get = (await cookies()).get(sessionCookieNames.auth);
   return <ContinueIntegration searchParams={searchParams} provider={provider} logged={!!get?.name} />;
 }

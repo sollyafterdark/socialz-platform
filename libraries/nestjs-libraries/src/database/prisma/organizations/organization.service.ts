@@ -1,5 +1,5 @@
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
-import { HttpException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable } from '@nestjs/common';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
 import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.team.member.dto';
@@ -9,7 +9,13 @@ import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import dayjs from 'dayjs';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { Organization, ShortLinkPreference, User } from '@prisma/client';
-import { AutopostService } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.service';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import {
+  assertWorkspaceAdmin,
+  assertServerOwner,
+  assertInviteRole,
+  WorkspaceContext,
+} from './workspace-access';
 
 @Injectable()
 export class OrganizationService {
@@ -34,8 +40,18 @@ export class OrganizationService {
     return this._organizationRepository.getCount();
   }
 
-  async createMaxUser(id: string, name: string, saasName: string, email: string) {
-    return this._organizationRepository.createMaxUser(id, name, saasName, email);
+  async createMaxUser(
+    id: string,
+    name: string,
+    saasName: string,
+    email: string
+  ) {
+    return this._organizationRepository.createMaxUser(
+      id,
+      name,
+      saasName,
+      email
+    );
   }
 
   addUserToOrg(
@@ -88,6 +104,14 @@ export class OrganizationService {
     return this._organizationRepository.getTeam(orgId);
   }
 
+  getWorkspaceSettings(orgId: string) {
+    return this._organizationRepository.getWorkspaceSettings(orgId);
+  }
+
+  updateWorkspaceName(orgId: string, name: string) {
+    return this._organizationRepository.updateWorkspaceName(orgId, name);
+  }
+
   async setStreak(organizationId: string, type: 'start' | 'end') {
     return this._organizationRepository.setStreak(organizationId, type);
   }
@@ -100,30 +124,194 @@ export class OrganizationService {
     return this._organizationRepository.getOrgByCustomerId(customerId);
   }
 
-  async inviteTeamMember(org: Organization, user: User, body: AddTeamMemberDto) {
-    const timeLimit = dayjs().add(2, 'day').format('YYYY-MM-DD HH:mm:ss');
-    const id = makeId(5);
-    // only the invite fields, the body can carry undeclared properties
-    const url =
+  async createWorkspace(org: WorkspaceContext, user: User, name: string) {
+    assertWorkspaceAdmin(org, user);
+    return this._organizationRepository.createWorkspace(name, user.id);
+  }
+
+  async removeWorkspace(org: WorkspaceContext, user: User, name: string) {
+    assertServerOwner(user);
+    return this._organizationRepository.removeWorkspace(org.id, name, user.id);
+  }
+
+  async changeTeamRole(
+    org: WorkspaceContext,
+    user: User,
+    id: string,
+    role: 'USER' | 'ADMIN'
+  ) {
+    assertServerOwner(user);
+    return this._organizationRepository.manageMember(org.id, user, id, role);
+  }
+
+  leaveWorkspace(org: WorkspaceContext, user: User) {
+    return this._organizationRepository.leaveWorkspace(org.id, user.id);
+  }
+
+  validInvitation(
+    details: { id: string; orgId: string; role: string; email: string },
+    email?: string
+  ) {
+    return this._organizationRepository.validInvitation(details, email);
+  }
+
+  acceptInvitation(
+    userId: string,
+    details: {
+      id: string;
+      orgId: string;
+      role: 'USER' | 'ADMIN';
+      email: string;
+    }
+  ) {
+    return this._organizationRepository.acceptInvitation(userId, details);
+  }
+
+  createInvitedUser(
+    body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
+    ip: string,
+    agent: string,
+    details: {
+      id: string;
+      orgId: string;
+      role: 'USER' | 'ADMIN';
+      email: string;
+    }
+  ) {
+    return this._organizationRepository.createInvitedUser(
+      body,
+      this._notificationsService.hasEmailProvider(),
+      ip,
+      agent,
+      details
+    );
+  }
+
+  private invitationUrl(invite: {
+    id: string;
+    organizationId: string;
+    role: string;
+    email: string;
+    expiresAt: Date;
+  }) {
+    return (
       process.env.FRONTEND_URL +
-      `/?org=${AuthService.signJWT({
-        email: body.email,
-        role: body.role,
-        orgId: org.id,
-        timeLimit,
-        id,
-      })}`;
-    if (body.sendEmail) {
-      const inviter = user.name
-        ? `${user.name} (${user.email})`
-        : user.email;
-      await this._notificationsService.sendEmail(
-        body.email,
-        `${user.name || user.email} invited you to join "${org.name}"`,
-        `${inviter} has invited you to join the "${org.name}" team.<br /><a href="${url}">Accept the invitation</a> to get started.<br />The link will expire in 2 days.`
+      '/?org=' +
+      AuthService.signJWT({
+        purpose: 'team-invitation',
+        id: invite.id,
+        orgId: invite.organizationId,
+        role: invite.role,
+        email: invite.email,
+        timeLimit: invite.expiresAt.toISOString(),
+      })
+    );
+  }
+
+  private async sendInvitation(
+    org: Organization,
+    user: User,
+    invite: {
+      id: string;
+      organizationId: string;
+      role: string;
+      email: string;
+      expiresAt: Date;
+    }
+  ) {
+    const escape = (value: string) =>
+      value.replace(
+        /[&<>"']/g,
+        (c) =>
+          ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+          }[c]!)
+      );
+    await this._notificationsService.sendEmail(
+      invite.email,
+      `${user.name || user.email} invited you to join "${org.name}"`,
+      `${escape(user.name || user.email)} has invited you to join the "${escape(
+        org.name
+      )}" team.<br /><a href="${this.invitationUrl(
+        invite
+      )}">Accept the invitation</a>.<br />Sign in or register with ${escape(
+        invite.email
+      )}. The link expires on ${escape(invite.expiresAt.toUTCString())}.`
+    );
+  }
+
+  async inviteTeamMember(
+    org: WorkspaceContext,
+    user: User,
+    body: AddTeamMemberDto
+  ) {
+    assertInviteRole(org, user, body.role);
+    const invite = await this._organizationRepository.createInvitation({
+      id: makeSecureId(32),
+      organizationId: org.id,
+      email: body.email.trim().toLowerCase(),
+      role: body.role as 'USER' | 'ADMIN',
+      invitedBy: user.isSuperAdmin
+        ? (
+            await this._organizationRepository.getSuperAdminUser(org.id)
+          )?.userId || user.id
+        : user.id,
+      expiresAt: dayjs().add(2, 'day').toDate(),
+    });
+    try {
+      if (body.sendEmail) await this.sendInvitation(org, user, invite);
+    } catch (error) {
+      await this._organizationRepository.revokeInvitation(
+        org.id,
+        invite.id,
+        user.id
+      );
+      throw new BadRequestException(
+        'Invitation email could not be sent. Please try again.'
       );
     }
-    return { url };
+    return { url: this.invitationUrl(invite) };
+  }
+
+  listInvitations(org: WorkspaceContext, user: User) {
+    assertWorkspaceAdmin(org, user);
+    return this._organizationRepository.listInvitations(org.id);
+  }
+
+  async invitationAction(
+    org: WorkspaceContext,
+    user: User,
+    id: string,
+    action: 'copy' | 'resend' | 'revoke'
+  ) {
+    assertWorkspaceAdmin(org, user);
+    const invite = await this._organizationRepository.getInvitation(org.id, id);
+    if (!invite)
+      throw new BadRequestException('Invitation not found in this workspace');
+    assertInviteRole(org, user, invite.role);
+    if (action === 'revoke')
+      return this._organizationRepository.revokeInvitation(org.id, id, user.id);
+    if (invite.acceptedAt || invite.revokedAt || invite.expiresAt <= new Date())
+      throw new BadRequestException(
+        'Create a new invitation; this invitation has expired or is no longer pending'
+      );
+    await this.validInvitation({
+      id: invite.id,
+      orgId: invite.organizationId,
+      role: invite.role,
+      email: invite.email,
+    });
+    if (action === 'resend') await this.sendInvitation(org, user, invite);
+    return { url: this.invitationUrl(invite) };
+  }
+
+  teamAudit(org: WorkspaceContext, user: User) {
+    assertWorkspaceAdmin(org, user);
+    return this._organizationRepository.teamAudit(org.id);
   }
 
   async addTeamMemberByEmail(org: Organization, body: AdminAddTeamMemberDto) {
@@ -143,7 +331,10 @@ export class OrganizationService {
       body.email
     );
     if (!users.length) {
-      throw new HttpException('No Postiz account found for this email', 400);
+      throw new HttpException(
+        'No active Socialz account found for this email',
+        400
+      );
     }
 
     if (users.length > 1) {
@@ -182,24 +373,9 @@ export class OrganizationService {
     return { added: true };
   }
 
-  async deleteTeamMember(org: Organization, userId: string) {
-    const userOrgs = await this._organizationRepository.getOrgsByUserId(userId);
-    const findOrgToDelete = userOrgs.find((orgUser) => orgUser.id === org.id);
-    if (!findOrgToDelete) {
-      throw new Error('User is not part of this organization');
-    }
-
-    // @ts-ignore
-    const myRole = org.users[0].role;
-    const userRole = findOrgToDelete.users[0].role;
-    const myLevel = myRole === 'USER' ? 0 : myRole === 'ADMIN' ? 1 : 2;
-    const userLevel = userRole === 'USER' ? 0 : userRole === 'ADMIN' ? 1 : 2;
-
-    if (myLevel < userLevel) {
-      throw new Error('You do not have permission to delete this user');
-    }
-
-    return this._organizationRepository.deleteTeamMember(org.id, userId);
+  deleteTeamMember(org: WorkspaceContext, userId: string, user: User) {
+    assertWorkspaceAdmin(org, user);
+    return this._organizationRepository.manageMember(org.id, user, userId);
   }
 
   disableOrEnableNonSuperAdminUsers(orgId: string, disable: boolean) {

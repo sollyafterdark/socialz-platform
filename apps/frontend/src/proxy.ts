@@ -1,4 +1,6 @@
+import { sessionCookieNames } from '@gitroom/helpers/auth/session.cookies';
 import { NextResponse } from 'next/server';
+import { verify } from 'jsonwebtoken';
 import type { NextRequest } from 'next/server';
 import { getCookieUrlFromDomain } from '@gitroom/helpers/subdomain/subdomain.management';
 import { internalFetch } from '@gitroom/helpers/utils/internal.fetch';
@@ -13,10 +15,46 @@ acceptLanguage.languages(languages);
 // This function can be marked `async` if using `await` inside
 export async function proxy(request: NextRequest) {
   const nextUrl = request.nextUrl;
-  const authCookie =
-    request.cookies.get('auth') ||
+  const rawAuth =
+    request.cookies.get(sessionCookieNames.auth)?.value ||
     request.headers.get('auth') ||
     nextUrl.searchParams.get('loggedAuth');
+  // Cookie presence alone does not establish a live session. In particular,
+  // expired tokens or cookies issued by another app must not redirect sign-in.
+  let authCookie: string | undefined;
+  if (rawAuth && process.env.JWT_SECRET) {
+    try {
+      const payload = verify(rawAuth, process.env.JWT_SECRET, {
+        algorithms: ['HS256'],
+      });
+      if (
+        typeof payload === 'object' &&
+        typeof payload.id === 'string' &&
+        payload.id
+      ) {
+        authCookie = rawAuth;
+      }
+    } catch {
+      // The API remains the authority for account and organisation access.
+    }
+  }
+  const clearSession = (response: NextResponse) => {
+    for (const name of [
+      sessionCookieNames.auth,
+      sessionCookieNames.showorg,
+      sessionCookieNames.impersonate,
+    ]) {
+      response.cookies.set(name, '', {
+        path: '/',
+        ...(!process.env.NOT_SECURED
+          ? { secure: true, httpOnly: true, sameSite: 'none' as const }
+          : {}),
+        maxAge: -1,
+        domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
+      });
+    }
+    return response;
+  };
   const lng = request.cookies.has(cookieName)
     ? acceptLanguage.get(request.cookies.get(cookieName).value)
     : acceptLanguage.get(
@@ -44,6 +82,9 @@ export async function proxy(request: NextRequest) {
   }
 
   if (
+    // Public branding and Corresponding Source must work before sign-in.
+    nextUrl.pathname.startsWith('/brand/') ||
+    nextUrl.pathname.startsWith('/source/') ||
     nextUrl.pathname.startsWith('/uploads/') ||
     nextUrl.pathname.startsWith('/p/') ||
     nextUrl.pathname.startsWith('/provider/') ||
@@ -67,26 +108,35 @@ export async function proxy(request: NextRequest) {
     const response = NextResponse.redirect(
       new URL('/auth/login', nextUrl.href)
     );
-    response.cookies.set('auth', '', {
-      path: '/',
-      ...(!process.env.NOT_SECURED
-        ? {
-            secure: true,
-            httpOnly: true,
-            sameSite: false,
-          }
-        : {}),
-      maxAge: -1,
-      domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
-    });
-    return response;
+    return clearSession(response);
   }
 
   if (
     nextUrl.pathname.startsWith('/auth/register') &&
-    process.env.DISABLE_REGISTRATION === 'true'
+    process.env.DISABLE_REGISTRATION === 'true' &&
+    !request.cookies.has(sessionCookieNames.org)
   ) {
     return NextResponse.redirect(new URL('/auth/login', nextUrl.href));
+  }
+
+  if (
+    !authCookie &&
+    (rawAuth || request.cookies.has(sessionCookieNames.auth))
+  ) {
+    return clearSession(
+      nextUrl.pathname.startsWith('/auth')
+        ? topResponse
+        : NextResponse.redirect(new URL('/auth/login', nextUrl.href))
+    );
+  }
+
+  // Recovery must also work for people who are already signed in. Do not send
+  // either the request form or an emailed reset link back to the dashboard.
+  if (
+    nextUrl.pathname === '/auth/forgot' ||
+    nextUrl.pathname.startsWith('/auth/forgot/')
+  ) {
+    return topResponse;
   }
 
   const org = nextUrl.searchParams.get('org');
@@ -115,7 +165,7 @@ export async function proxy(request: NextRequest) {
   if (nextUrl.pathname.startsWith('/auth') && !authCookie) {
     if (org) {
       const redirect = NextResponse.redirect(new URL(`/`, nextUrl.href));
-      redirect.cookies.set('org', org, {
+      redirect.cookies.set(sessionCookieNames.org, org, {
         ...(!process.env.NOT_SECURED
           ? {
               path: '/',
@@ -133,19 +183,21 @@ export async function proxy(request: NextRequest) {
   }
   try {
     if (org) {
-      const { id } = await (
-        await internalFetch('/user/join-org', {
-          body: JSON.stringify({
-            org,
-          }),
-          method: 'POST',
-        })
-      ).json();
+      const joinResponse = await internalFetch('/user/join-org', {
+        body: JSON.stringify({
+          org,
+        }),
+        method: 'POST',
+      });
+      const { id } = joinResponse.ok ? await joinResponse.json() : { id: null };
       const redirect = NextResponse.redirect(
-        new URL(`/?added=true`, nextUrl.href)
+        new URL(
+          id ? '/?added=true' : '/settings?tab=teams&invitation=unavailable',
+          nextUrl.href
+        )
       );
       if (id) {
-        redirect.cookies.set('showorg', id, {
+        redirect.cookies.set(sessionCookieNames.showorg, id, {
           ...(!process.env.NOT_SECURED
             ? {
                 path: '/',

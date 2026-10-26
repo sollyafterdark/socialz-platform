@@ -167,10 +167,9 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                         <div className="text-[24px] mobile:text-[20px] font-[600] flex flex-1 min-w-0">
                           <Title />
                         </div>
-                        <div className="flex gap-[20px] mobile:gap-[14px] mobile:items-center text-textItemBlur">
+                        <div className="flex items-center gap-[20px] mobile:gap-[10px] text-textItemBlur">
                           <StreakComponent />
                           <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />
-                          <OrganizationSelector />
                           <InvoicesComponent />
                           <div className="hover:text-newTextColor">
                             <ModeComponent />
@@ -184,6 +183,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                           <div className="contents mobile:hidden">
                             <AttachToFeedbackIcon />
                           </div>
+                          <OrganizationSelector />
                           <NotificationComponent />
                         </div>
                       </div>
